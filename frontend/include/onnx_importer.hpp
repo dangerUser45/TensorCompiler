@@ -3,11 +3,20 @@
 #include <string>
 
 #include "onnx.pb.h"
+#include "graph.hpp"
 
-namespace tc::frontend::onnx {
+namespace tc::frontend {
+using Graph = graph::Graph<std::string, float>;
+
+namespace onnx {
 
 bool LoadOnnxModel(const std::string& path,
                    ::onnx::ModelProto& out_model,
                    std::string& out_error);
 
-}  // namespace tc::frontend::onnx
+bool ImportOnnxToGraph(const std::string& path,
+                        ::onnx::ModelProto& input_model,
+                        Graph& out_graph,
+                        std::string& out_error);
+}   // namespace onnx
+}   // namespace tc::frontend::onnx
