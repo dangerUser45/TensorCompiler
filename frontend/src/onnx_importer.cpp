@@ -1,6 +1,44 @@
 #include "onnx_importer.hpp"
 
 #include <fstream>
+#include <stdexcept>
+
+namespace {
+
+bool ValidateOnnxModel(const ::onnx::ModelProto& model) {
+    if (!model.has_graph()) {
+        throw std::runtime_error("ERROR: ONNX model has no graph");
+    }
+
+    if(!model.ir_version()) {
+        throw std::runtime_error("WARN: ONNX model has no IR version");
+    }
+
+    if(model.graph().node_size() < 0) {
+        throw std::runtime_error("ERROR: ONNX graph has invalid amount of nodes");
+    }
+    return true;
+}
+
+bool ValidateOnnxGraph(const ::onnx::GraphProto& graph) {
+    if (graph.name().empty()) {
+        throw std::runtime_error("WARN: ONNX graph has no name");
+    }
+
+    if (graph.output_size() == 0) {
+        throw std::runtime_error("ERROR: ONNX graph has no output");
+    }
+
+    
+
+
+    return true;
+}
+
+bool ValidateOnnxNode(const ::onnx::NodeProto& node) {
+    return true;
+}
+} //namespace
 
 namespace tc::frontend::onnx {
 
@@ -28,5 +66,6 @@ bool LoadOnnxModel(const std::string& path,
 
     return true;
 }
+
 
 }  // namespace tc::frontend::onnx
