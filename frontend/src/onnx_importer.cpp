@@ -2,11 +2,13 @@
 #include "graph.hpp"
 #include "onnx.pb.h"
 
+#include <cstdint>
+#include <cstring>
 #include <fstream>
+#include <google/protobuf/repeated_field.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <limits>
 #include <unordered_set>
 
 namespace {
@@ -154,47 +156,168 @@ bool onnx::LoadOnnxModel(const std::string& path,
 
 
 namespace detail {
-using TensorsT = std::vector<std::unique_ptr<graph::Tensor>>;
 
 bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi, 
-        std::vector<graph::dims_map>& out_dims,
-        std::string& out_error)
+        std::vector<int64_t>& out_shape,
+        std::string& /*out_error*/)
 {
+    out_shape.clear();
+
     if  (!vi.has_type() || !vi.type().has_tensor_type() || 
         !vi.type().tensor_type().has_shape()) 
     {
-        return true;
+        return true; //it is possible
     }
 
     const auto& shape = vi.type().tensor_type().shape();
-    out_dims.reserve(shape.dim_size());
+    out_shape.reserve(shape.dim_size());
 
     for (int i = 0; i < shape.dim_size(); ++i) 
     {
-        graph::dims_map d{};
-        d.dims = i;
-
         const auto& dim = shape.dim(i);
-        if (!dim.has_dim_value()) {
-            d.elems_per_dim = -1;
+        if (dim.has_dim_value()) {
+            out_shape.push_back(dim.dim_value());
         } else {
-            const auto v = dim.dim_value();
-            if (v < std::numeric_limits<int>::min() || 
-                v > std::numeric_limits<int>::max()) {
-                out_error = "Input '" + vi.name() + "': dim_value out of int range";
-                return false;
-            }
-            d.elems_per_dim = static_cast<int>(v);
+            out_shape.push_back(-1);
+        }
+    }
+
+    return true;
+}
+
+template <typename T>
+bool ParseRawVector(const std::string& raw,
+                    std::vector<T>& out,
+                    std::string& out_error,
+                    const std::string& init_name) {
+    if (raw.size() % sizeof(T) != 0) {
+        return SetError(out_error, "ERROR: initializer '" + init_name 
+                + "' has invalid raw_data size");
+    }
+    out.resize(raw.size() / sizeof(T));
+    std::memcpy(out.data(), raw.data(), raw.size());
+    return true;
+}
+
+template <typename OutT, typename InT>
+bool FillNumericFromFieldOrRaw(const ::onnx::TensorProto& tp,
+                               const ::google::protobuf::RepeatedField<InT>& field,
+                               graph::Initializers& out_init,
+                               std::string& out_error,
+                               const char* type_name) {
+    std::vector<OutT> values;
+    if (!field.empty()) {
+        values.reserve(field.size());
+        for (const auto x : field) {
+            values.push_back(static_cast<OutT>(x));
+        }
+    } else if (tp.has_raw_data()) {
+        if (!ParseRawVector<OutT>(tp.raw_data(), values, out_error, tp.name())) return false;
+    } else {
+        return SetError(out_error, "ERROR: initializer '" + tp.name() +
+                "' has no " + std::string(type_name) + " data");
+    }
+
+    out_init.set_values(std::move(values));
+    return true;
+}
+
+bool FillInitializerValues(const ::onnx::TensorProto& tp,
+                           graph::Initializers& out_init,
+                           std::string& out_error) {
+    const auto dt = static_cast<::onnx::TensorProto_DataType>(tp.data_type());
+
+    switch (dt) {
+        case ::onnx::TensorProto_DataType_FLOAT:
+            return FillNumericFromFieldOrRaw<float>(
+                tp, tp.float_data(), out_init, out_error, "FLOAT");
+
+        case ::onnx::TensorProto_DataType_DOUBLE:
+            return FillNumericFromFieldOrRaw<double>(
+                tp, tp.double_data(), out_init, out_error, "DOUBLE");
+
+        case ::onnx::TensorProto_DataType_INT32:
+            return FillNumericFromFieldOrRaw<int32_t>(
+                tp, tp.int32_data(), out_init, out_error, "INT32");
+
+        case ::onnx::TensorProto_DataType_INT64:
+            return FillNumericFromFieldOrRaw<int64_t>(
+                tp, tp.int64_data(), out_init, out_error, "INT64");
+
+        case ::onnx::TensorProto_DataType_UINT8:
+            return FillNumericFromFieldOrRaw<uint8_t>(
+                tp, tp.int32_data(), out_init, out_error, "UINT8");
+
+        case ::onnx::TensorProto_DataType_INT8:
+            return FillNumericFromFieldOrRaw<int8_t>(
+                tp, tp.int32_data(), out_init, out_error, "INT8");
+
+        case ::onnx::TensorProto_DataType_UINT16:
+            return FillNumericFromFieldOrRaw<uint16_t>(
+                tp, tp.int32_data(), out_init, out_error, "UINT16");
+
+        case ::onnx::TensorProto_DataType_INT16:
+            return FillNumericFromFieldOrRaw<int16_t>(
+                tp, tp.int32_data(), out_init, out_error, "INT16");
+
+        case ::onnx::TensorProto_DataType_UINT32:
+            return FillNumericFromFieldOrRaw<uint32_t>(
+                tp, tp.uint64_data(), out_init, out_error, "UINT32");
+
+        case ::onnx::TensorProto_DataType_UINT64:
+            return FillNumericFromFieldOrRaw<uint64_t>(
+                tp, tp.uint64_data(), out_init, out_error, "UINT64");
+
+        case ::onnx::TensorProto_DataType_STRING: {
+            std::vector<std::string> v;
+            v.reserve(tp.string_data_size());
+            for (int i = 0; i < tp.string_data_size(); ++i) v.push_back(tp.string_data(i));
+            out_init.set_values(std::move(v));
+            return true;
         }
 
-        out_dims.push_back(d);
+        default:
+            return SetError(
+                out_error,
+                "ERROR: unsupported initializer type for '" + tp.name() + "': " +
+                ::onnx::TensorProto_DataType_Name(dt));
+    }
+}
+
+bool BuildInitializers(const ::onnx::GraphProto& g,
+                       Graph::InitVecT& out_inits,
+                       std::string& out_error) {
+    out_inits.clear();
+
+    out_inits.reserve(g.initializer_size());
+    for (int i = 0; i < g.initializer_size(); ++i) {
+        const auto& tp = g.initializer(i);
+
+        if (tp.name().empty()) {
+            return SetError(out_error, "ERROR: initializer has empty name");
+        }
+        if (!tp.has_data_type()) {
+            return SetError(out_error, "ERROR: initializer '" + tp.name() + "' has no data_type");
+        }
+
+        auto init = std::make_unique<graph::Initializers>();
+        init->set_name(tp.name());
+
+        std::vector<int64_t> shape;
+        shape.reserve(tp.dims_size());
+        for (int d = 0; d < tp.dims_size(); ++d) shape.push_back(tp.dims(d));
+        init->set_shape(std::move(shape));
+
+        if (!FillInitializerValues(tp, *init, out_error)) return false;
+
+        out_inits.push_back(std::move(init));
     }
 
     return true;
 }
 
 bool BuildInputTensors(const ::onnx::GraphProto& g,
-                        TensorsT& out_inputs,
+                        Graph::TensVecT& out_inputs,
                         std::string& out_error)
 {
     out_inputs.clear();
@@ -220,21 +343,21 @@ bool BuildInputTensors(const ::onnx::GraphProto& g,
             continue;
         }
 
-        std::vector<graph::dims_map> dims;
-        if (!ParseDimsFromValueInfo(in, dims, out_error)) {
+        std::vector<int64_t> shape;
+        if (!ParseDimsFromValueInfo(in, shape, out_error)) {
             return false;
         }
 
-        auto t = std::make_unique<graph::Tensor>();
+        auto t = std::make_unique<graph::TensorInfo>();
         t->set_name(in.name());
-        t->set_dims_data(dims);
+        t->set_shape(shape);
         out_inputs.push_back(std::move(t));
     }
     return true;
 }
 
 bool BuildOutputTensors(const ::onnx::GraphProto& g,
-                        TensorsT& out_outputs,
+                        Graph::TensVecT& out_outputs,
                         std::string& out_error)
 {
     out_outputs.clear();
@@ -250,14 +373,14 @@ bool BuildOutputTensors(const ::onnx::GraphProto& g,
             return false;
         }
 
-        std::vector<graph::dims_map> dims;
-        if (!ParseDimsFromValueInfo(out, dims, out_error)) {
+        std::vector<int64_t> shape;
+        if (!ParseDimsFromValueInfo(out, shape, out_error)) {
             return false;
         }
 
-        auto t  = std::make_unique<graph::Tensor>();
+        auto t  = std::make_unique<graph::TensorInfo>();
         t->set_name(out.name());
-        t->set_dims_data(dims);
+        t->set_shape(shape);
         out_outputs.push_back(std::move(t));
     }
 
@@ -270,19 +393,26 @@ bool BuildGraph(const ::onnx::GraphProto& g,
 {
     out_graph.set_name(g.name());
     
-    TensorsT input_tensors;
+    Graph::TensVecT input_tensors;
     if (!BuildInputTensors(g, input_tensors, out_error)) {
         return false;
     }
 
     out_graph.set_input_tensors(std::move(input_tensors));
 
-    TensorsT output_tensors;
+    Graph::TensVecT output_tensors;
     if (!BuildOutputTensors(g, output_tensors, out_error)) {
         return false;
     }
 
     out_graph.set_output_tensors(std::move(output_tensors));
+
+    Graph::InitVecT initializers;
+    if (!BuildInitializers(g, initializers, out_error)) {
+        return false;
+    }
+
+    out_graph.set_inits(std::move(initializers));
 
     return true;
 }
