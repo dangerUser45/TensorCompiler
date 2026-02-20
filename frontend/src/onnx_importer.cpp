@@ -316,6 +316,191 @@ bool BuildInitializers(const ::onnx::GraphProto& g,
     return true;
 }
 
+std::string BuildNodeContext(const ::onnx::NodeProto& node, int node_index) 
+{
+    if (!node.name().empty()) {
+        return "node[" + std::to_string(node_index) + "]('" + node.name() + "')";
+    }
+    return "node[" + std::to_string(node_index) + "]";
+}
+
+::onnx::AttributeProto_AttributeType ResolveAttributeType(const ::onnx::AttributeProto& attr) 
+{
+    if (attr.has_type()) {
+        return attr.type();
+    }
+
+    if (attr.has_f()) return ::onnx::AttributeProto_AttributeType_FLOAT;
+    if (attr.has_i()) return ::onnx::AttributeProto_AttributeType_INT;
+    if (attr.has_s()) return ::onnx::AttributeProto_AttributeType_STRING;
+    if (attr.floats_size() > 0) return ::onnx::AttributeProto_AttributeType_FLOATS;
+    if (attr.ints_size() > 0) return ::onnx::AttributeProto_AttributeType_INTS;
+    if (attr.strings_size() > 0) return ::onnx::AttributeProto_AttributeType_STRINGS;
+
+    return ::onnx::AttributeProto_AttributeType_UNDEFINED;
+}
+
+bool FillAttributeValues(const ::onnx::AttributeProto& src,
+                         graph::Attribute& dst,
+                         std::string& out_error,
+                         const std::string& attr_context) 
+{
+    const auto type = ResolveAttributeType(src);
+
+    switch (type) {
+        case ::onnx::AttributeProto_AttributeType_FLOAT: {
+            if (!src.has_f()) {
+                return SetError(out_error, "ERROR: " + attr_context + " FLOAT has no value");
+            }
+            dst.set_values<float>({src.f()});
+            return true;
+        }
+
+        case ::onnx::AttributeProto_AttributeType_INT: {
+            if (!src.has_i()) {
+                return SetError(out_error, "ERROR: " + attr_context + " INT has no value");
+            }
+            dst.set_values<int64_t>({src.i()});
+            return true;
+        }
+
+        case ::onnx::AttributeProto_AttributeType_STRING: {
+            if (!src.has_s()) {
+                return SetError(out_error, "ERROR: " + attr_context + " STRING has no value");
+            }
+            dst.set_values<std::string>({src.s()});
+            return true;
+        }
+
+        case ::onnx::AttributeProto_AttributeType_FLOATS: {
+            std::vector<float> values;
+            values.reserve(src.floats_size());
+            for (int i = 0; i < src.floats_size(); ++i) {
+                values.push_back(src.floats(i));
+            }
+            dst.set_values<float>(std::move(values));
+            return true;
+        }
+
+        case ::onnx::AttributeProto_AttributeType_INTS: {
+            std::vector<int64_t> values;
+            values.reserve(src.ints_size());
+            for (int i = 0; i < src.ints_size(); ++i) {
+                values.push_back(src.ints(i));
+            }
+            dst.set_values<int64_t>(std::move(values));
+            return true;
+        }
+
+        case ::onnx::AttributeProto_AttributeType_STRINGS: {
+            std::vector<std::string> values;
+            values.reserve(src.strings_size());
+            for (int i = 0; i < src.strings_size(); ++i) {
+                values.push_back(src.strings(i));
+            }
+            dst.set_values<std::string>(std::move(values));
+            return true;
+        }
+
+        default:
+            return SetError(
+                out_error,
+                "ERROR: " + attr_context + " unsupported type: " +
+                    ::onnx::AttributeProto_AttributeType_Name(type));
+    }
+}
+
+bool ParseAttribute(const ::onnx::AttributeProto& src,
+                    std::unique_ptr<graph::Attribute>& out_attr,
+                    std::string& out_error,
+                    const std::string& node_context,
+                    int attr_index) 
+{
+    const std::string attr_context = node_context + ".attribute[" + std::to_string(attr_index) + "]";
+
+    auto attr = std::make_unique<graph::Attribute>();
+    attr->set_name(src.name());
+
+    if (!FillAttributeValues(src, *attr, out_error, attr_context)) {
+        return false;
+    }
+
+    out_attr = std::move(attr);
+    return true;
+}
+
+bool BuildNodeAttributes(const ::onnx::NodeProto& src,
+                         graph::Node::AttrVecT& out_attrs,
+                         std::string& out_error,
+                         const std::string& node_context) 
+{
+    out_attrs.clear();
+    out_attrs.reserve(src.attribute_size());
+
+    for (int i = 0; i < src.attribute_size(); ++i) {
+        std::unique_ptr<graph::Attribute> attr;
+        if (!ParseAttribute(src.attribute(i), attr, out_error, node_context, i)) {
+            return false;
+        }
+        out_attrs.push_back(std::move(attr));
+    }
+
+    return true;
+}
+
+bool ParseNode(const ::onnx::NodeProto& src,
+               std::unique_ptr<graph::Node>& out_node,
+               std::string& out_error,
+               int node_index) 
+{
+    const std::string node_context = BuildNodeContext(src, node_index);
+
+    auto node = std::make_unique<graph::Node>();
+    node->set_name_node(src.name());
+    node->set_name_op(src.op_type());
+
+    std::vector<std::string> inputs;
+    inputs.reserve(src.input_size());
+    for (int i = 0; i < src.input_size(); ++i) {
+        inputs.push_back(src.input(i));
+    }
+    node->set_inputs(std::move(inputs));
+
+    std::vector<std::string> outputs;
+    outputs.reserve(src.output_size());
+    for (int i = 0; i < src.output_size(); ++i) {
+        outputs.push_back(src.output(i));
+    }
+    node->set_outputs(std::move(outputs));
+
+    graph::Node::AttrVecT attrs;
+    if (!BuildNodeAttributes(src, attrs, out_error, node_context)) {
+        return false;
+    }
+    node->set_attr(std::move(attrs));
+
+    out_node = std::move(node);
+    return true;
+}
+
+bool BuildNodes(const ::onnx::GraphProto& g,
+                Graph::NodeVecT& out_nodes,
+                std::string& out_error) 
+{
+    out_nodes.clear();
+
+    out_nodes.reserve(g.node_size());
+    for (int i = 0; i < g.node_size(); ++i) {
+        std::unique_ptr<graph::Node> node;
+        if (!ParseNode(g.node(i), node, out_error, i)) {
+            return false;
+        }
+        out_nodes.push_back(std::move(node));
+    }
+
+    return true;
+}
+
 bool BuildInputTensors(const ::onnx::GraphProto& g,
                         Graph::TensVecT& out_inputs,
                         std::string& out_error)
@@ -413,6 +598,13 @@ bool BuildGraph(const ::onnx::GraphProto& g,
     }
 
     out_graph.set_inits(std::move(initializers));
+
+    Graph::NodeVecT nodes;
+    if (!BuildNodes(g, nodes, out_error)) {
+        return false;
+    }
+
+    out_graph.set_nodes(std::move(nodes));
 
     return true;
 }
