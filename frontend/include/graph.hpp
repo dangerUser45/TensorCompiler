@@ -1,61 +1,126 @@
 #pragma once
 
-#include <vector>
-#include <string>
+#include <cstdint>
 #include <memory>
-#include <typeinfo>
+#include <stdexcept>
+#include <string>
 #include <utility>
+#include <variant>
+#include <vector>
+#include <complex>
+
+#include "type_info.hpp"
 
 namespace tc::frontend::graph {
+class Visitor;
 
-struct dims_map { int dims, elems_per_dim; };
-class Tensor{ 
-  public:
-    virtual ~Tensor() = default;
+using TensorData = std::variant<
+  std::monostate,
 
-    const std::string& get_name() const noexcept { return name_; }
-    const std::vector<dims_map>& get_dims_data() const noexcept { return this->dims_data_; }
+  std::vector<int8_t>,
+  std::vector<int16_t>,
+  std::vector<int32_t>,
+  std::vector<int64_t>,
 
-    void set_name(std::string name) { name_ = std::move(name); }
-    void set_dims_data(std::vector<dims_map> dims_data) { dims_data_ = std::move(dims_data); }
+  std::vector<uint8_t>,
+  std::vector<uint32_t>,
+  std::vector<uint16_t>,
+  std::vector<uint64_t>,
   
-  private:
-  // enum TensorDataType type_;  //NOTE may make different type of tensor 
-  std::string name_;
-  std::vector<dims_map> dims_data_;
-};
+  std::vector<float>,
+  std::vector<double>,
 
-template <typename dataT>
-struct Initializers final : Tensor {
-  public:
-    const std::vector<dataT>& get_values() const noexcept {return values_;}
-    const std::string& get_type_name() const noexcept { return type_name_; } 
+  std::vector<std::complex<float>>,
+  std::vector<std::complex<double>>,
+  
+  std::vector<std::string>
+>;
 
-    void set_values (std::vector<dataT> values) { values_ = std::move(values); }
+class TensorInfo {
+  public: 
+    TensorInfo() = default;
+    
+    virtual ~TensorInfo() = default;
 
-  private:
-    std::vector<dataT> values_;
-    std::string type_name_ = typeid(dataT).name();
-};
-
-template <typename dataAttrT>
-class Attribute final {
-  public:
+    TensorInfo(const TensorInfo&) = delete;            // -- чтобы не было срезки
+    TensorInfo& operator=(const TensorInfo&) = delete; //
+    TensorInfo(TensorInfo&&) = delete;
+    TensorInfo& operator=(TensorInfo&&) = delete;
+    
     const std::string& get_name() const noexcept { return name_; }
-    const std::vector<dataAttrT>& get_values() const noexcept { return values_; }
+    const std::vector<int64_t>& get_shape() const noexcept { return shape_; }
 
     void set_name(std::string name) { name_ = std::move(name); }
-    void set_values(std::vector<dataAttrT> values) { values_ = std::move(values); }
+    void set_shape(std::vector<int64_t> shape) { shape_ = std::move(shape); }
 
   private:
     std::string name_;
-    std::vector<dataAttrT> values_;
+    std::vector<int64_t> shape_;
 };
 
-template <typename dataAttrT>
+struct Initializers final : TensorInfo {
+  public:
+    template <typename T>
+    const std::vector<T>& get_values() const {
+      if (data_type_ == DataT::UNDEFINED)
+        throw std::logic_error("Type hasn't been defined yet. Use \"set_values()\"");
+      return std::get<std::vector<T>>(values_);
+    }
+
+    DataT get_data_type() const noexcept { return data_type_; }
+
+    template <typename T>
+    void set_values(std::vector<T> vec) {
+      constexpr DataT kType = TypeInfo<T>::type;
+
+      // Если тип уже зафиксирован, запрещаем менять его на другой.
+      if (data_type_ != DataT::UNDEFINED && data_type_ != kType) {
+        throw std::logic_error("set_values: dtype change is forbidden");
+      }
+      values_ = std::move(vec);
+      data_type_ = kType;
+    }
+
+  private:
+    DataT data_type_ = DataT::UNDEFINED;
+    TensorData values_ = std::monostate{};
+};
+
+class Attribute final {
+  public:
+    template <typename T>
+    const std::vector<T>& get_values() const {
+      if (data_type_ == DataT::UNDEFINED)
+        throw std::logic_error("Type hasn't been defined yet. Use \"set_values()\"");
+      return std::get<std::vector<T>>(values_);
+    }
+
+    const std::string& get_name() const noexcept { return name_; }
+    DataT get_data_type() const noexcept { return data_type_; }
+  
+    template <typename T>
+    void set_values(std::vector<T> vec) {
+      constexpr DataT kType = TypeInfo<T>::type;
+
+      // Если тип уже зафиксирован, запрещаем менять его на другой.
+      if (data_type_ != DataT::UNDEFINED && data_type_ != kType) {
+        throw std::logic_error("set_values: dtype change is forbidden");
+      }
+      values_ = std::move(vec);
+      data_type_ = kType;
+    }
+
+    void set_name(std::string name) { name_ = std::move(name); }
+
+  private:
+    std::string name_;
+    DataT data_type_ = DataT::UNDEFINED;
+    TensorData values_ = std::monostate{};
+};
+
 class Node final {
   public:
-    using AttrVecT = std::vector<std::unique_ptr<Attribute<dataAttrT>>>;
+    using AttrVecT = std::vector<std::unique_ptr<Attribute>>;
     
     const std::string& get_name_node() const noexcept { return name_node_; }
     const std::string& get_name_op() const noexcept { return name_op_; }
@@ -79,20 +144,21 @@ class Node final {
     AttrVecT attr_;
 };
 
-template <typename dataAttrT, typename dataT>
 class Graph final {
 public:
   Graph() = default;
   ~Graph() = default;
+
+  // void accept(Visitor& v) {*(v.visit->this)}; // TODO сделать accept()
 
   Graph(const Graph&) = delete;                  // copy forbidden 
   Graph& operator=(const Graph&) = delete;       // because use unique_ptr
   Graph(Graph&&) noexcept = default;             // move is allowed
   Graph& operator=(Graph&&) noexcept = default;  //
   
-  using NodeVecT = std::vector<std::unique_ptr<Node<dataAttrT>>>;
-  using InitVecT = std::vector<std::unique_ptr<Initializers<dataT>>>;
-  using TensVecT = std::vector<std::unique_ptr<Tensor>>; 
+  using NodeVecT = std::vector<std::unique_ptr<Node>>;
+  using InitVecT = std::vector<std::unique_ptr<Initializers>>;
+  using TensVecT = std::vector<std::unique_ptr<TensorInfo>>; 
   
   const std::string& get_name () const noexcept { return name_; }
   const NodeVecT& get_nodes() const noexcept { return nodes_; }
@@ -100,9 +166,9 @@ public:
   const TensVecT& get_input_tensors() const noexcept { return input_tensor_vec_; }
   const TensVecT& get_output_tensors() const noexcept { return output_tensor_vec_; }
 
-  void set_name(std::string new_name)  {name_ = std::move(new_name);}
-  void set_nodes(NodeVecT&& nodes)  { nodes_ = std::move(nodes); }
-  void set_inits(InitVecT&& inits)  { inits_ = std::move(inits); }
+  void set_name(std::string new_name) { name_  = std::move(new_name); }
+  void set_nodes(NodeVecT&& nodes)    { nodes_ = std::move(nodes); }
+  void set_inits(InitVecT&& inits)    { inits_ = std::move(inits); }
   void set_input_tensors(TensVecT&& input_tensor)  { input_tensor_vec_ = std::move(input_tensor); }
   void set_output_tensors(TensVecT&& output_tensor) { output_tensor_vec_ = std::move(output_tensor); }
   
