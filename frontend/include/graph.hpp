@@ -11,7 +11,8 @@
 
 #include "type_info.hpp"
 
-namespace tc::frontend::graph {
+namespace tc::frontend {
+
 class Visitor;
 
 using TensorData = std::variant<
@@ -53,36 +54,38 @@ class TensorInfo {
     void set_name(std::string name) { name_ = std::move(name); }
     void set_shape(std::vector<int64_t> shape) { shape_ = std::move(shape); }
 
+    DataT get_data_type() const noexcept { return data_type_; }
+
+  protected:
+    DataT data_type_ {};
+    
   private:
     std::string name_;
     std::vector<int64_t> shape_;
 };
 
-struct Initializers final : TensorInfo {
+struct Initializers final : public TensorInfo {
   public:
     template <typename T>
     const std::vector<T>& get_values() const {
-      if (data_type_ == DataT::UNDEFINED)
+      if (data_type_.id  == DataID::UNDEFINED)
         throw std::logic_error("Type hasn't been defined yet. Use \"set_values()\"");
       return std::get<std::vector<T>>(values_);
     }
 
-    DataT get_data_type() const noexcept { return data_type_; }
-
     template <typename T>
     void set_values(std::vector<T> vec) {
-      constexpr DataT kType = TypeInfo<T>::type;
+      DataT type = TypeInfo<T>::type;
 
       // Если тип уже зафиксирован, запрещаем менять его на другой.
-      if (data_type_ != DataT::UNDEFINED && data_type_ != kType) {
+      if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
         throw std::logic_error("set_values: dtype change is forbidden");
       }
       values_ = std::move(vec);
-      data_type_ = kType;
+      data_type_ = type;
     }
 
   private:
-    DataT data_type_ = DataT::UNDEFINED;
     TensorData values_ = std::monostate{};
 };
 
@@ -90,7 +93,7 @@ class Attribute final {
   public:
     template <typename T>
     const std::vector<T>& get_values() const {
-      if (data_type_ == DataT::UNDEFINED)
+      if (data_type_.id == DataID::UNDEFINED)
         throw std::logic_error("Type hasn't been defined yet. Use \"set_values()\"");
       return std::get<std::vector<T>>(values_);
     }
@@ -100,27 +103,30 @@ class Attribute final {
   
     template <typename T>
     void set_values(std::vector<T> vec) {
-      constexpr DataT kType = TypeInfo<T>::type;
+      DataT type = TypeInfo<T>::type;
 
       // Если тип уже зафиксирован, запрещаем менять его на другой.
-      if (data_type_ != DataT::UNDEFINED && data_type_ != kType) {
+      if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
         throw std::logic_error("set_values: dtype change is forbidden");
       }
       values_ = std::move(vec);
-      data_type_ = kType;
+      data_type_ = type;
     }
 
     void set_name(std::string name) { name_ = std::move(name); }
 
   private:
     std::string name_;
-    DataT data_type_ = DataT::UNDEFINED;
+    DataT data_type_ {};
     TensorData values_ = std::monostate{};
 };
 
 class Node final {
   public:
     using AttrVecT = std::vector<std::unique_ptr<Attribute>>;
+
+    //NOTE пока NODE - final, accept не нужен
+    // virtual void accept(Visitor& v) = 0; 
     
     const std::string& get_name_node() const noexcept { return name_node_; }
     const std::string& get_name_op() const noexcept { return name_op_; }
@@ -148,8 +154,6 @@ class Graph final {
 public:
   Graph() = default;
   ~Graph() = default;
-
-  // void accept(Visitor& v) {*(v.visit->this)}; // TODO сделать accept()
 
   Graph(const Graph&) = delete;                  // copy forbidden 
   Graph& operator=(const Graph&) = delete;       // because use unique_ptr
@@ -181,4 +185,4 @@ private:
   TensVecT input_tensor_vec_ {};
   TensVecT output_tensor_vec_ {};
 };
-} //namespace tc::frontend::graph
+} //namespace tc::frontend
