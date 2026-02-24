@@ -161,6 +161,8 @@ private:
     }
   }
 
+  void print_io_header() { out_ << "// ===== INPUTS/OUTPUTS =====\n\t"; }
+
   void print_io_tensors(const Graph::TensVecT& tensors,
                         const std::string& title) {
     for (size_t i = 0; i != tensors.size(); ++i) {
@@ -172,12 +174,14 @@ private:
       out_ <<       "<TR><TD BGCOLOR=\"" << IO_HEADER_COLOR << "\"><B>" << to_upper(title) << "</B></TD></TR>\n\t\t\t\t"
                     "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>name</B>: " << tensors[i]->get_name() << "</TD></TR>\n\t\t\t\t"
                     "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>dtype</B>: " << tensors[i]->get_data_type().data_type_str << "</TD></TR>\n\t\t\t\t"
-                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>shape</B>: " << print_shape(tensors[i]->get_shape()) << "</TD></TR>\n\t\t\t\t";
+                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>shape</B>: " << print_shape(tensors[i]->get_shape()) << "</TD></TR>\n\t\t\t";
       end_table();
     }
   }
 
   void print_inits(const Graph::InitVecT& inits) {
+    out_ << "// ===== INITIALIZERS =====\n\t";
+
     for (size_t i = 0; i != inits.size(); ++i) {
       if (!inits[i]) continue;
 
@@ -191,16 +195,17 @@ private:
 
       const int64_t n_elements = element_count(inits[i]->get_shape());
       if (n_elements > 16) {
-        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>storage</B>: raw_data</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>storage</B>: raw_data</TD></TR>\n\t\t\t";
       } else {
-        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>values</B>: " << init_values_as_string(*inits[i]) << "</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>values</B>: " << init_values_as_string(*inits[i]) << "</TD></TR>\n\t\t\t";
       }
-
       end_table();
     }
   }
 
   void print_op_nodes(const Graph::NodeVecT& nodes) {
+    out_ << "// ===== NODES =====\n\t";
+
     for (size_t i = 0; i != nodes.size(); ++i) {
       if (!nodes[i]) continue;
 
@@ -214,7 +219,7 @@ private:
 
       const auto& attrs = nodes[i]->get_attrs();
       if (attrs.empty()) {
-        out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t";
       } else {
         out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"5\">\n\t\t\t\t\t"
                 "<TR><TD BGCOLOR=\"" << ATTR_HEADER_COLOR << "\"><B>ATTRIBUTES</B></TD></TR>\n\t\t\t\t\t";
@@ -224,12 +229,12 @@ private:
           out_ << "<TR><TD BGCOLOR=\"" << ATTR_BASE_COLOR << "\"><B>"
                << attrs[j]->get_name()
                << "</B>: " << attr_values_as_string(*attrs[j])
-               << "</TD></TR>\n\t\t\t\t\t";
+               << "</TD></TR>\n\t\t\t\t";
+               if(j != attrs.size() - 1) out_ << "\t";
         }
 
-        out_ << "</TABLE></TD></TR>\n\t\t\t\t";
+        out_ << "</TABLE></TD></TR>\n\t\t\t";
       }
-
       end_table();
     }
   }
@@ -307,7 +312,7 @@ private:
         if (!printed_edges.insert(edge_key).second) continue;
 
         out_ << prod_it->second << " -> " << current_node_id
-             << " [label=\"" << input_name << "\"];\n\t";
+             << " [xlabel=\"" << input_name << "\"];\n\t";
       }
 
       for (const std::string& output_name : nodes[i]->get_outputs()) {
@@ -327,11 +332,13 @@ private:
       if (!printed_edges.insert(edge_key).second) continue;
 
       out_ << prod_it->second << " -> " << output_id
-           << " [label=\"" << output_name << "\"];\n\t";
+           << " [xlabel=\"" << output_name << "\"];\n";
+      if(i != outputs.size() - 1) out_ << "\t";
     }
   }
 
   void print_graph(Graph& graph) {
+    print_io_header();
     print_io_tensors(graph.get_input_tensors(), "input");
     print_io_tensors(graph.get_output_tensors(), "output");
     print_inits(graph.get_inits());

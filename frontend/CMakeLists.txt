@@ -57,3 +57,6 @@ target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
 
 add_executable(onnx_smoke src/onnx_smoke.cpp)
 target_link_libraries(onnx_smoke PRIVATE tc_frontend_onnx)
+
+enable_testing()
+add_subdirectory(tests)
