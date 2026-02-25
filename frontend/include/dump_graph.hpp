@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <fstream>
@@ -98,6 +99,43 @@ std::string normalize_name(std::string name) {
     return print_vector(names);
   }
 
+  std::string print_names_multiline_html(const std::vector<std::string>& names) {
+    if (names.empty()) return "(none)";
+
+    std::ostringstream oss;
+    for (size_t i = 0; i != names.size(); ++i) {
+      oss << names[i];
+      if (i + 1 != names.size()) oss << "<BR ALIGN=\"LEFT\"/>";
+    }
+    return oss.str();
+  }
+
+  template <typename T>
+  std::string value_to_string(const T& value) {
+    std::ostringstream oss;
+    if constexpr (std::is_same_v<T, int8_t>   || std::is_same_v<T, int16_t>  ||
+                  std::is_same_v<T, int32_t>  || std::is_same_v<T, int64_t>  ||
+                  std::is_same_v<T, uint8_t>  || std::is_same_v<T, uint16_t> ||
+                  std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>) {
+      oss << static_cast<long long>(value);
+    } else {
+      oss << value;
+    }
+    return oss.str();
+  }
+
+  template <typename T>
+  std::string print_vector_multiline_html(const std::vector<T>& values) {
+    if (values.empty()) return "[]";
+
+    std::ostringstream oss;
+    for (size_t i = 0; i != values.size(); ++i) {
+      oss << value_to_string(values[i]);
+      if (i + 1 != values.size()) oss << "<BR ALIGN=\"LEFT\"/>";
+    }
+    return oss.str();
+  }
+
   std::string to_upper(std::string value) {
     for (char& c : value) {
       if (c >= 'a' && c <= 'z') c = static_cast<char>(c - ('a' - 'A'));
@@ -150,6 +188,27 @@ std::string normalize_name(std::string name) {
     }
   }
 
+  std::string init_values_as_multiline_html(const Initializers& init) {
+    try {
+      switch (init.get_data_type().id) {
+        case DataID::INT8: return print_vector_multiline_html(init.get_values<int8_t>());
+        case DataID::INT16: return print_vector_multiline_html(init.get_values<int16_t>());
+        case DataID::INT32: return print_vector_multiline_html(init.get_values<int32_t>());
+        case DataID::INT64: return print_vector_multiline_html(init.get_values<int64_t>());
+        case DataID::UNSIGNED_INT8: return print_vector_multiline_html(init.get_values<uint8_t>());
+        case DataID::UNSIGNED_INT16: return print_vector_multiline_html(init.get_values<uint16_t>());
+        case DataID::UNSIGNED_INT32: return print_vector_multiline_html(init.get_values<uint32_t>());
+        case DataID::UNSIGNED_INT64: return print_vector_multiline_html(init.get_values<uint64_t>());
+        case DataID::FLOAT: return print_vector_multiline_html(init.get_values<float>());
+        case DataID::DOUBLE: return print_vector_multiline_html(init.get_values<double>());
+        case DataID::STRING: return print_vector_multiline_html(init.get_values<std::string>());
+        default: return "(unknown)";
+      }
+    } catch (...) {
+      return "(unknown)";
+    }
+  }
+
   std::string attr_values_as_string(const Attribute& attr) {
     try {
       switch (attr.get_data_type().id) {
@@ -169,6 +228,13 @@ std::string normalize_name(std::string name) {
     } catch (...) {
       return "(" + attr.get_data_type().data_type_str + ")";
     }
+  }
+
+  int edge_minlen_from_label(const std::string& label) {
+    constexpr size_t kCharsPerRank = 12;
+    constexpr int kMaxMinLen = 12;
+    const int minlen = 1 + static_cast<int>(label.size() / kCharsPerRank);
+    return std::min(minlen, kMaxMinLen);
   }
 
   void print_io_header() { out_ << "// ===== INPUTS/OUTPUTS =====\n\t"; }
@@ -207,7 +273,9 @@ std::string normalize_name(std::string name) {
       if (n_elements > 16) {
         out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>storage</B>: raw_data</TD></TR>\n\t\t\t";
       } else {
-        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>values</B>: " << init_values_as_string(*inits[i]) << "</TD></TR>\n\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\" ALIGN=\"LEFT\"><B>values</B>:<BR ALIGN=\"LEFT\"/>"
+             << init_values_as_multiline_html(*inits[i])
+             << "</TD></TR>\n\t\t\t";
       }
       end_table();
     }
@@ -224,8 +292,8 @@ std::string normalize_name(std::string name) {
       begin_table();
       out_ <<       "<TR><TD BGCOLOR=\"" << OPERAT_HEADER_COLOR << "\"><B>OPERATION</B></TD></TR>\n\t\t\t\t"
                     "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>name</B>: " << id << "</TD></TR>\n\t\t\t\t"
-                    "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>inputs</B>: " << print_names(nodes[i]->get_inputs()) << "</TD></TR>\n\t\t\t\t"
-                    "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>outputs</B>: " << print_names(nodes[i]->get_outputs()) << "</TD></TR>\n\t\t\t\t";
+                    "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\" ALIGN=\"LEFT\"><B>inputs</B>:<BR ALIGN=\"LEFT\"/>" << print_names_multiline_html(nodes[i]->get_inputs()) << "</TD></TR>\n\t\t\t\t"
+                    "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\" ALIGN=\"LEFT\"><B>outputs</B>:<BR ALIGN=\"LEFT\"/>" << print_names_multiline_html(nodes[i]->get_outputs()) << "</TD></TR>\n\t\t\t\t";
 
       const auto& attrs = nodes[i]->get_attrs();
       if (attrs.empty()) {
@@ -327,7 +395,9 @@ std::string normalize_name(std::string name) {
         if (!printed_edges.insert(edge_key).second) continue;
 
         out_ << prod_it->second << " -> " << current_node_id
-             << " [xlabel=\"" << input_name << "\"];\n\t";
+             << " [xlabel=\"" << input_name
+             << "\", minlen=" << edge_minlen_from_label(input_name)
+             << "];\n\t";
       }
 
       for (const std::string& raw_output_name : nodes[i]->get_outputs()) {
@@ -348,7 +418,9 @@ std::string normalize_name(std::string name) {
       if (!printed_edges.insert(edge_key).second) continue;
 
       out_ << prod_it->second << " -> " << output_id
-           << " [xlabel=\"" << output_name << "\"];\n";
+           << " [xlabel=\"" << output_name
+           << "\", minlen=" << edge_minlen_from_label(output_name)
+           << "];\n";
       if(i != outputs.size() - 1) out_ << "\t";
     }
   }
