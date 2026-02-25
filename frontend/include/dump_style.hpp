@@ -2,8 +2,8 @@
 
 namespace tc::frontend {
 
-  inline constexpr const float NODESEP                   = 0.75;
-  inline constexpr const float RANKSEP                   = 0.75;
+  inline constexpr const float NODESEP                   = 1.5;
+  inline constexpr const float RANKSEP                   = 1.5;
   inline constexpr const float PEN_WIDTH                 = 1.5;
   inline constexpr const float ARROW_SIZE                = 0.7;
   inline constexpr const int TITLE_FONT_SIZE             = 28;

@@ -58,3 +58,6 @@ target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
 
 add_executable(frontend_driver src/frontend_driver.cpp)
 target_link_libraries(frontend_driver PRIVATE tc_frontend_onnx)
+
+enable_testing()
+add_subdirectory(tests)

@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cctype>
 #include <cstddef>
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,7 +29,7 @@ private:
   std::ofstream& out_;
 
   void begin_graph(Graph& graph) {
-    out_ << "digraph " << graph.get_name() << " {\n\t";
+    out_ << "digraph " << normalize_name(graph.get_name()) << " {\n\t";
     out_ << "rankdir=TB\n\t"
             "splines=ortho;\n\t"
             "nodesep=" << NODESEP << ";\n\t"
@@ -79,6 +81,14 @@ private:
     return oss.str();
   }
 
+std::string normalize_name(std::string name) {
+    for (char& c : name) {
+        if (!std::isalnum(static_cast<unsigned char>(c))) {
+            c = '_';
+        }
+    }
+    return name;
+}
   std::string print_shape(const std::vector<int64_t>& shape) {
     return print_vector(shape);
   }
@@ -98,12 +108,12 @@ private:
   std::string tensor_id(const TensorInfo& tensor,
                         const std::string& prefix,
                         size_t index) {
-    if (!tensor.get_name().empty()) return tensor.get_name();
-    return prefix + "_" + std::to_string(index);
+    if (!tensor.get_name().empty()) return normalize_name(tensor.get_name());
+    return normalize_name(prefix) + "_" + std::to_string(index);
   }
 
   std::string node_id(const Node& node, size_t index) {
-    if (!node.get_name_node().empty()) return node.get_name_node();
+    if (!node.get_name_node().empty()) return normalize_name(node.get_name_node());
     return "op_" + std::to_string(index);
   }
 
@@ -161,6 +171,8 @@ private:
     }
   }
 
+  void print_io_header() { out_ << "// ===== INPUTS/OUTPUTS =====\n\t"; }
+
   void print_io_tensors(const Graph::TensVecT& tensors,
                         const std::string& title) {
     for (size_t i = 0; i != tensors.size(); ++i) {
@@ -170,14 +182,16 @@ private:
       out_ << id << " [\n\t\t";
       begin_table();
       out_ <<       "<TR><TD BGCOLOR=\"" << IO_HEADER_COLOR << "\"><B>" << to_upper(title) << "</B></TD></TR>\n\t\t\t\t"
-                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>name</B>: " << tensors[i]->get_name() << "</TD></TR>\n\t\t\t\t"
+                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>name</B>: " << normalize_name(tensors[i]->get_name()) << "</TD></TR>\n\t\t\t\t"
                     "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>dtype</B>: " << tensors[i]->get_data_type().data_type_str << "</TD></TR>\n\t\t\t\t"
-                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>shape</B>: " << print_shape(tensors[i]->get_shape()) << "</TD></TR>\n\t\t\t\t";
+                    "<TR><TD BGCOLOR=\"" << IO_BASE_COLOR << "\"><B>shape</B>: " << print_shape(tensors[i]->get_shape()) << "</TD></TR>\n\t\t\t";
       end_table();
     }
   }
 
   void print_inits(const Graph::InitVecT& inits) {
+    out_ << "// ===== INITIALIZERS =====\n\t";
+
     for (size_t i = 0; i != inits.size(); ++i) {
       if (!inits[i]) continue;
 
@@ -191,16 +205,17 @@ private:
 
       const int64_t n_elements = element_count(inits[i]->get_shape());
       if (n_elements > 16) {
-        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>storage</B>: raw_data</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>storage</B>: raw_data</TD></TR>\n\t\t\t";
       } else {
-        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>values</B>: " << init_values_as_string(*inits[i]) << "</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << INITS_BASE_COLOR << "\"><B>values</B>: " << init_values_as_string(*inits[i]) << "</TD></TR>\n\t\t\t";
       }
-
       end_table();
     }
   }
 
   void print_op_nodes(const Graph::NodeVecT& nodes) {
+    out_ << "// ===== NODES =====\n\t";
+
     for (size_t i = 0; i != nodes.size(); ++i) {
       if (!nodes[i]) continue;
 
@@ -214,7 +229,7 @@ private:
 
       const auto& attrs = nodes[i]->get_attrs();
       if (attrs.empty()) {
-        out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t\t";
+        out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t";
       } else {
         out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR << "\"><TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"5\">\n\t\t\t\t\t"
                 "<TR><TD BGCOLOR=\"" << ATTR_HEADER_COLOR << "\"><B>ATTRIBUTES</B></TD></TR>\n\t\t\t\t\t";
@@ -224,12 +239,12 @@ private:
           out_ << "<TR><TD BGCOLOR=\"" << ATTR_BASE_COLOR << "\"><B>"
                << attrs[j]->get_name()
                << "</B>: " << attr_values_as_string(*attrs[j])
-               << "</TD></TR>\n\t\t\t\t\t";
+               << "</TD></TR>\n\t\t\t\t";
+               if(j != attrs.size() - 1) out_ << "\t";
         }
 
-        out_ << "</TABLE></TD></TR>\n\t\t\t\t";
+        out_ << "</TABLE></TD></TR>\n\t\t\t";
       }
-
       end_table();
     }
   }
@@ -241,7 +256,8 @@ private:
     std::unordered_map<std::string, std::string> init_name_to_id;
     for (size_t i = 0; i != inits.size(); ++i) {
       if (!inits[i]) continue;
-      init_name_to_id[inits[i]->get_name()] = tensor_id(*inits[i], "init", i);
+      const std::string init_name = normalize_name(inits[i]->get_name());
+      init_name_to_id[init_name] = tensor_id(*inits[i], "init", i);
     }
 
     std::unordered_set<std::string> ranked_inits;
@@ -258,8 +274,9 @@ private:
       if (!nodes[i]) continue;
 
       out_ << "{ rank=same; ";
-      for (const std::string& name : nodes[i]->get_inputs()) {
-        const auto it = init_name_to_id.find(name);
+      for (const std::string& raw_input_name : nodes[i]->get_inputs()) {
+        const std::string input_name = normalize_name(raw_input_name);
+        const auto it = init_name_to_id.find(input_name);
         if (it == init_name_to_id.end()) continue;
         if (ranked_inits.insert(it->second).second) {
           out_ << it->second << "; ";
@@ -285,12 +302,14 @@ private:
 
     for (size_t i = 0; i != inputs.size(); ++i) {
       if (!inputs[i]) continue;
-      producer_by_tensor[inputs[i]->get_name()] = tensor_id(*inputs[i], "input", i);
+      const std::string input_name = normalize_name(inputs[i]->get_name());
+      producer_by_tensor[input_name] = tensor_id(*inputs[i], "input", i);
     }
 
     for (size_t i = 0; i != inits.size(); ++i) {
       if (!inits[i]) continue;
-      producer_by_tensor[inits[i]->get_name()] = tensor_id(*inits[i], "init", i);
+      const std::string init_name = normalize_name(inits[i]->get_name());
+      producer_by_tensor[init_name] = tensor_id(*inits[i], "init", i);
     }
 
     out_ << "// ===== DATA FLOW (orthogonal edges) =====\n\t";
@@ -299,7 +318,8 @@ private:
 
       const std::string current_node_id = node_id(*nodes[i], i);
 
-      for (const std::string& input_name : nodes[i]->get_inputs()) {
+      for (const std::string& raw_input_name : nodes[i]->get_inputs()) {
+        const std::string input_name = normalize_name(raw_input_name);
         const auto prod_it = producer_by_tensor.find(input_name);
         if (prod_it == producer_by_tensor.end()) continue;
 
@@ -307,10 +327,11 @@ private:
         if (!printed_edges.insert(edge_key).second) continue;
 
         out_ << prod_it->second << " -> " << current_node_id
-             << " [label=\"" << input_name << "\"];\n\t";
+             << " [xlabel=\"" << input_name << "\"];\n\t";
       }
 
-      for (const std::string& output_name : nodes[i]->get_outputs()) {
+      for (const std::string& raw_output_name : nodes[i]->get_outputs()) {
+        const std::string output_name = normalize_name(raw_output_name);
         producer_by_tensor[output_name] = current_node_id;
       }
     }
@@ -318,7 +339,7 @@ private:
     for (size_t i = 0; i != outputs.size(); ++i) {
       if (!outputs[i]) continue;
 
-      const std::string output_name = outputs[i]->get_name();
+      const std::string output_name = normalize_name(outputs[i]->get_name());
       const auto prod_it = producer_by_tensor.find(output_name);
       if (prod_it == producer_by_tensor.end()) continue;
 
@@ -327,11 +348,13 @@ private:
       if (!printed_edges.insert(edge_key).second) continue;
 
       out_ << prod_it->second << " -> " << output_id
-           << " [label=\"" << output_name << "\"];\n\t";
+           << " [xlabel=\"" << output_name << "\"];\n";
+      if(i != outputs.size() - 1) out_ << "\t";
     }
   }
 
   void print_graph(Graph& graph) {
+    print_io_header();
     print_io_tensors(graph.get_input_tensors(), "input");
     print_io_tensors(graph.get_output_tensors(), "output");
     print_inits(graph.get_inits());
@@ -339,5 +362,5 @@ private:
     set_rank(graph.get_input_tensors(), graph.get_inits(), graph.get_nodes(), graph.get_output_tensors());
     set_links(graph.get_input_tensors(), graph.get_inits(), graph.get_nodes(), graph.get_output_tensors());
   }
-};
+}; // class DumpGraph
 } // namespace tc::frontend

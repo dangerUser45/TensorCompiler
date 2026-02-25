@@ -13,8 +13,6 @@
 
 namespace tc::frontend {
 
-class Visitor;
-
 using TensorData = std::variant<
   std::monostate,
 
