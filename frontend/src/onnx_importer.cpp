@@ -7,131 +7,23 @@
 #include <fstream>
 #include <google/protobuf/repeated_field.h>
 #include <string>
-#include <unordered_map>
-#include <vector>
 #include <unordered_set>
+#include <vector>
 
 namespace {
-bool SetError(std::string& out_error, std::string msg) {
+bool SetError(std::string& out_error, std::string msg)
+{
     out_error = std::move(msg);
     return false;
 }
-
-//TODO: добавить больше проверок на warnings 
-bool ValidateInitializers(const ::onnx::GraphProto& graph, std::string& out_error)
-{
-    std::unordered_map<std::string, int> init_names;
-    for (int i = 0; i < graph.initializer_size(); ++i) 
-    {
-        const auto& name = graph.initializer(i).name();
-        if (name.empty()) {
-            return SetError(out_error, "ERROR: ONNX graph has empty initializer name");
-        }
-        if (init_names.find(name) != init_names.end()) {
-            return SetError(out_error, "ERROR: ONNX graph has duplicate initializer name");
-        }
-        init_names[name] = 1;
-    }
-    return true;
-}
-
-bool ValidateOnnxNode(const ::onnx::NodeProto& node, std::string& out_error) 
-{
-    if (node.output_size() == 0) {
-        return SetError(out_error, "ERROR: ONNX node has no output");
-    }
-
-    if (node.op_type().empty()) {
-        return SetError(out_error, "ERROR: ONNX node has no op type");
-    }
-
-    return true;
-}
-
-bool ValidateNodeOutputDups(const ::onnx::GraphProto& graph, std::string& out_error)
-{
-    std::unordered_set<std::string> global_outputs;
-    for (int ni = 0; ni < graph.node_size(); ++ni) 
-    {
-        const auto& node = graph.node(ni);
-        std::unordered_set<std::string> local_outputs;
-
-        for (int oi = 0; oi < node.output_size(); ++oi) 
-        {
-            const std::string& out = node.output(oi);
-            if (out.empty()) {
-                return SetError(out_error, "ERROR: empty output name");
-            }
-
-            if(!local_outputs.insert(out).second) {
-                return SetError(out_error, "ERROR: duplicate output name inside same node");
-            }
-
-            if(!global_outputs.insert(out).second) {
-                return SetError(out_error, "ERROR: duplicate output name across nodes");
-            }
-        }
-    }
-    return true;
-}
-
-bool ValidateOnnxGraph(const ::onnx::GraphProto& graph, std::string& out_error) 
-{
-    out_error.clear();
-
-    if (graph.name().empty()) {
-        return SetError(out_error, "WARN: ONNX graph has no name");
-    }
-
-    if (graph.output_size() == 0) {
-        return SetError(out_error, "ERROR: ONNX graph has no output");
-    }
-
-    if (!ValidateInitializers(graph, out_error)) return false;
-    if (!ValidateNodeOutputDups(graph, out_error)) return false;
-
-    for (int i = 0; i < graph.node_size(); ++i) 
-    {
-        const auto& node = graph.node(i);
-        if (!ValidateOnnxNode(node, out_error)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool ValidateOnnxModel(const ::onnx::ModelProto& model, std::string& out_error) 
-{
-    out_error.clear();
-
-    if (!model.has_graph()) {
-        return SetError(out_error, "ERROR: ONNX model has no graph");
-    }
-
-    if(!model.ir_version()) {
-        return SetError(out_error, "WARN: ONNX model has no IR version");
-    }
-
-    if(model.graph().node_size() < 0) {
-        return SetError(out_error, "ERROR: ONNX graph has invalid amount of nodes");
-    }
-
-    if(model.opset_import_size() == 0) {
-        return SetError(out_error, "WARN: ONNX model has no opset import");
-    }
-
-    return ValidateOnnxGraph(model.graph(), out_error);
-}
-
-
-} //namespace
+} // namespace
 
 namespace tc::frontend {
 
 bool onnx::LoadOnnxModel(const std::string& path,
-                   ::onnx::ModelProto& out_model,
-                   std::string& out_error) {
+                         ::onnx::ModelProto& out_model,
+                         std::string& out_error)
+{
     out_model.Clear();
     out_error.clear();
 
@@ -154,26 +46,23 @@ bool onnx::LoadOnnxModel(const std::string& path,
     return true;
 }
 
-
 namespace detail {
 
-bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi, 
-        std::vector<int64_t>& out_shape,
-        std::string& /*out_error*/)
+bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi,
+                            std::vector<int64_t>& out_shape,
+                            std::string& /*out_error*/)
 {
     out_shape.clear();
 
-    if  (!vi.has_type() || !vi.type().has_tensor_type() || 
-        !vi.type().tensor_type().has_shape()) 
-    {
-        return true; //it is possible
+    if (!vi.has_type() || !vi.type().has_tensor_type() ||
+        !vi.type().tensor_type().has_shape()) {
+        return true; // it is possible
     }
 
     const auto& shape = vi.type().tensor_type().shape();
     out_shape.reserve(shape.dim_size());
 
-    for (int i = 0; i < shape.dim_size(); ++i) 
-    {
+    for (int i = 0; i < shape.dim_size(); ++i) {
         const auto& dim = shape.dim(i);
         if (dim.has_dim_value()) {
             out_shape.push_back(dim.dim_value());
@@ -185,26 +74,30 @@ bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi,
     return true;
 }
 
-template <typename T>
+template<typename T>
 bool ParseRawVector(const std::string& raw,
                     std::vector<T>& out,
                     std::string& out_error,
-                    const std::string& init_name) {
+                    const std::string& init_name)
+{
     if (raw.size() % sizeof(T) != 0) {
-        return SetError(out_error, "ERROR: initializer '" + init_name 
-                + "' has invalid raw_data size");
+        return SetError(out_error,
+                        "ERROR: initializer '" + init_name +
+                            "' has invalid raw_data size");
     }
     out.resize(raw.size() / sizeof(T));
     std::memcpy(out.data(), raw.data(), raw.size());
     return true;
 }
 
-template <typename OutT, typename InT>
-bool FillNumericFromFieldOrRaw(const ::onnx::TensorProto& tp,
-                               const ::google::protobuf::RepeatedField<InT>& field,
-                               graph::Initializers& out_init,
-                               std::string& out_error,
-                               const char* type_name) {
+template<typename OutT, typename InT>
+bool FillNumericFromFieldOrRaw(
+    const ::onnx::TensorProto& tp,
+    const ::google::protobuf::RepeatedField<InT>& field,
+    Initializers& out_init,
+    std::string& out_error,
+    const char* type_name)
+{
     std::vector<OutT> values;
     if (!field.empty()) {
         values.reserve(field.size());
@@ -212,10 +105,12 @@ bool FillNumericFromFieldOrRaw(const ::onnx::TensorProto& tp,
             values.push_back(static_cast<OutT>(x));
         }
     } else if (tp.has_raw_data()) {
-        if (!ParseRawVector<OutT>(tp.raw_data(), values, out_error, tp.name())) return false;
+        if (!ParseRawVector<OutT>(tp.raw_data(), values, out_error, tp.name()))
+            return false;
     } else {
-        return SetError(out_error, "ERROR: initializer '" + tp.name() +
-                "' has no " + std::string(type_name) + " data");
+        return SetError(out_error,
+                        "ERROR: initializer '" + tp.name() + "' has no " +
+                            std::string(type_name) + " data");
     }
 
     out_init.set_values(std::move(values));
@@ -223,8 +118,9 @@ bool FillNumericFromFieldOrRaw(const ::onnx::TensorProto& tp,
 }
 
 bool FillInitializerValues(const ::onnx::TensorProto& tp,
-                           graph::Initializers& out_init,
-                           std::string& out_error) {
+                           Initializers& out_init,
+                           std::string& out_error)
+{
     const auto dt = static_cast<::onnx::TensorProto_DataType>(tp.data_type());
 
     switch (dt) {
@@ -271,22 +167,24 @@ bool FillInitializerValues(const ::onnx::TensorProto& tp,
         case ::onnx::TensorProto_DataType_STRING: {
             std::vector<std::string> v;
             v.reserve(tp.string_data_size());
-            for (int i = 0; i < tp.string_data_size(); ++i) v.push_back(tp.string_data(i));
+            for (int i = 0; i < tp.string_data_size(); ++i)
+                v.push_back(tp.string_data(i));
             out_init.set_values(std::move(v));
             return true;
         }
 
         default:
-            return SetError(
-                out_error,
-                "ERROR: unsupported initializer type for '" + tp.name() + "': " +
-                ::onnx::TensorProto_DataType_Name(dt));
+            return SetError(out_error,
+                            "ERROR: unsupported initializer type for '" +
+                                tp.name() +
+                                "': " + ::onnx::TensorProto_DataType_Name(dt));
     }
 }
 
 bool BuildInitializers(const ::onnx::GraphProto& g,
                        Graph::InitVecT& out_inits,
-                       std::string& out_error) {
+                       std::string& out_error)
+{
     out_inits.clear();
 
     out_inits.reserve(g.initializer_size());
@@ -297,18 +195,22 @@ bool BuildInitializers(const ::onnx::GraphProto& g,
             return SetError(out_error, "ERROR: initializer has empty name");
         }
         if (!tp.has_data_type()) {
-            return SetError(out_error, "ERROR: initializer '" + tp.name() + "' has no data_type");
+            return SetError(out_error,
+                            "ERROR: initializer '" + tp.name() +
+                                "' has no data_type");
         }
 
-        auto init = std::make_unique<graph::Initializers>();
+        auto init = std::make_unique<Initializers>();
         init->set_name(tp.name());
 
         std::vector<int64_t> shape;
         shape.reserve(tp.dims_size());
-        for (int d = 0; d < tp.dims_size(); ++d) shape.push_back(tp.dims(d));
+        for (int d = 0; d < tp.dims_size(); ++d)
+            shape.push_back(tp.dims(d));
         init->set_shape(std::move(shape));
 
-        if (!FillInitializerValues(tp, *init, out_error)) return false;
+        if (!FillInitializerValues(tp, *init, out_error))
+            return false;
 
         out_inits.push_back(std::move(init));
     }
@@ -316,59 +218,72 @@ bool BuildInitializers(const ::onnx::GraphProto& g,
     return true;
 }
 
-std::string BuildNodeContext(const ::onnx::NodeProto& node, int node_index) 
+std::string BuildNodeContext(const ::onnx::NodeProto& node, int node_index)
 {
     if (!node.name().empty()) {
-        return "node[" + std::to_string(node_index) + "]('" + node.name() + "')";
+        return "node[" + std::to_string(node_index) + "]('" + node.name() +
+               "')";
     }
     return "node[" + std::to_string(node_index) + "]";
 }
 
-::onnx::AttributeProto_AttributeType ResolveAttributeType(const ::onnx::AttributeProto& attr) 
+::onnx::AttributeProto_AttributeType ResolveAttributeType(
+    const ::onnx::AttributeProto& attr)
 {
     if (attr.has_type()) {
         return attr.type();
     }
 
-    if (attr.has_f()) return ::onnx::AttributeProto_AttributeType_FLOAT;
-    if (attr.has_i()) return ::onnx::AttributeProto_AttributeType_INT;
-    if (attr.has_s()) return ::onnx::AttributeProto_AttributeType_STRING;
-    if (attr.floats_size() > 0) return ::onnx::AttributeProto_AttributeType_FLOATS;
-    if (attr.ints_size() > 0) return ::onnx::AttributeProto_AttributeType_INTS;
-    if (attr.strings_size() > 0) return ::onnx::AttributeProto_AttributeType_STRINGS;
+    if (attr.has_f())
+        return ::onnx::AttributeProto_AttributeType_FLOAT;
+    if (attr.has_i())
+        return ::onnx::AttributeProto_AttributeType_INT;
+    if (attr.has_s())
+        return ::onnx::AttributeProto_AttributeType_STRING;
+    if (attr.floats_size() > 0)
+        return ::onnx::AttributeProto_AttributeType_FLOATS;
+    if (attr.ints_size() > 0)
+        return ::onnx::AttributeProto_AttributeType_INTS;
+    if (attr.strings_size() > 0)
+        return ::onnx::AttributeProto_AttributeType_STRINGS;
 
     return ::onnx::AttributeProto_AttributeType_UNDEFINED;
 }
 
 bool FillAttributeValues(const ::onnx::AttributeProto& src,
-                         graph::Attribute& dst,
+                         Attribute& dst,
                          std::string& out_error,
-                         const std::string& attr_context) 
+                         const std::string& attr_context)
 {
     const auto type = ResolveAttributeType(src);
 
     switch (type) {
         case ::onnx::AttributeProto_AttributeType_FLOAT: {
             if (!src.has_f()) {
-                return SetError(out_error, "ERROR: " + attr_context + " FLOAT has no value");
+                return SetError(out_error,
+                                "ERROR: " + attr_context +
+                                    " FLOAT has no value");
             }
-            dst.set_values<float>({src.f()});
+            dst.set_values<float>({ src.f() });
             return true;
         }
 
         case ::onnx::AttributeProto_AttributeType_INT: {
             if (!src.has_i()) {
-                return SetError(out_error, "ERROR: " + attr_context + " INT has no value");
+                return SetError(out_error,
+                                "ERROR: " + attr_context + " INT has no value");
             }
-            dst.set_values<int64_t>({src.i()});
+            dst.set_values<int64_t>({ src.i() });
             return true;
         }
 
         case ::onnx::AttributeProto_AttributeType_STRING: {
             if (!src.has_s()) {
-                return SetError(out_error, "ERROR: " + attr_context + " STRING has no value");
+                return SetError(out_error,
+                                "ERROR: " + attr_context +
+                                    " STRING has no value");
             }
-            dst.set_values<std::string>({src.s()});
+            dst.set_values<std::string>({ src.s() });
             return true;
         }
 
@@ -411,14 +326,15 @@ bool FillAttributeValues(const ::onnx::AttributeProto& src,
 }
 
 bool ParseAttribute(const ::onnx::AttributeProto& src,
-                    std::unique_ptr<graph::Attribute>& out_attr,
+                    std::unique_ptr<Attribute>& out_attr,
                     std::string& out_error,
                     const std::string& node_context,
-                    int attr_index) 
+                    int attr_index)
 {
-    const std::string attr_context = node_context + ".attribute[" + std::to_string(attr_index) + "]";
+    const std::string attr_context =
+        node_context + ".attribute[" + std::to_string(attr_index) + "]";
 
-    auto attr = std::make_unique<graph::Attribute>();
+    auto attr = std::make_unique<Attribute>();
     attr->set_name(src.name());
 
     if (!FillAttributeValues(src, *attr, out_error, attr_context)) {
@@ -430,16 +346,17 @@ bool ParseAttribute(const ::onnx::AttributeProto& src,
 }
 
 bool BuildNodeAttributes(const ::onnx::NodeProto& src,
-                         graph::Node::AttrVecT& out_attrs,
+                         Node::AttrVecT& out_attrs,
                          std::string& out_error,
-                         const std::string& node_context) 
+                         const std::string& node_context)
 {
     out_attrs.clear();
     out_attrs.reserve(src.attribute_size());
 
     for (int i = 0; i < src.attribute_size(); ++i) {
-        std::unique_ptr<graph::Attribute> attr;
-        if (!ParseAttribute(src.attribute(i), attr, out_error, node_context, i)) {
+        std::unique_ptr<Attribute> attr;
+        if (!ParseAttribute(
+                src.attribute(i), attr, out_error, node_context, i)) {
             return false;
         }
         out_attrs.push_back(std::move(attr));
@@ -449,13 +366,13 @@ bool BuildNodeAttributes(const ::onnx::NodeProto& src,
 }
 
 bool ParseNode(const ::onnx::NodeProto& src,
-               std::unique_ptr<graph::Node>& out_node,
+               std::unique_ptr<Node>& out_node,
                std::string& out_error,
-               int node_index) 
+               int node_index)
 {
     const std::string node_context = BuildNodeContext(src, node_index);
 
-    auto node = std::make_unique<graph::Node>();
+    auto node = std::make_unique<Node>();
     node->set_name_node(src.name());
     node->set_name_op(src.op_type());
 
@@ -473,7 +390,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
     }
     node->set_outputs(std::move(outputs));
 
-    graph::Node::AttrVecT attrs;
+    Node::AttrVecT attrs;
     if (!BuildNodeAttributes(src, attrs, out_error, node_context)) {
         return false;
     }
@@ -485,13 +402,13 @@ bool ParseNode(const ::onnx::NodeProto& src,
 
 bool BuildNodes(const ::onnx::GraphProto& g,
                 Graph::NodeVecT& out_nodes,
-                std::string& out_error) 
+                std::string& out_error)
 {
     out_nodes.clear();
 
     out_nodes.reserve(g.node_size());
     for (int i = 0; i < g.node_size(); ++i) {
-        std::unique_ptr<graph::Node> node;
+        std::unique_ptr<Node> node;
         if (!ParseNode(g.node(i), node, out_error, i)) {
             return false;
         }
@@ -502,22 +419,20 @@ bool BuildNodes(const ::onnx::GraphProto& g,
 }
 
 bool BuildInputTensors(const ::onnx::GraphProto& g,
-                        Graph::TensVecT& out_inputs,
-                        std::string& out_error)
+                       Graph::TensVecT& out_inputs,
+                       std::string& out_error)
 {
     out_inputs.clear();
     out_error.clear();
 
     std::unordered_set<std::string> init_names;
     init_names.reserve(g.initializer_size());
-    for (int i = 0; i < g.initializer_size(); ++i) 
-    {
+    for (int i = 0; i < g.initializer_size(); ++i) {
         init_names.insert(g.initializer(i).name());
     }
 
     out_inputs.reserve(g.input_size());
-    for (int i = 0; i < g.input_size(); ++i) 
-    {
+    for (int i = 0; i < g.input_size(); ++i) {
         const auto& in = g.input(i);
         if (in.name().empty()) {
             out_error = "Input '" + in.name() + "' has empty name";
@@ -533,7 +448,7 @@ bool BuildInputTensors(const ::onnx::GraphProto& g,
             return false;
         }
 
-        auto t = std::make_unique<graph::TensorInfo>();
+        auto t = std::make_unique<TensorInfo>();
         t->set_name(in.name());
         t->set_shape(shape);
         out_inputs.push_back(std::move(t));
@@ -550,8 +465,7 @@ bool BuildOutputTensors(const ::onnx::GraphProto& g,
 
     out_outputs.reserve(g.output_size());
 
-    for (int i = 0; i < g.output_size(); ++i)
-    {
+    for (int i = 0; i < g.output_size(); ++i) {
         const auto& out = g.output(i);
         if (out.name().empty()) {
             out_error = "Output has empty name";
@@ -563,7 +477,7 @@ bool BuildOutputTensors(const ::onnx::GraphProto& g,
             return false;
         }
 
-        auto t  = std::make_unique<graph::TensorInfo>();
+        auto t = std::make_unique<TensorInfo>();
         t->set_name(out.name());
         t->set_shape(shape);
         out_outputs.push_back(std::move(t));
@@ -573,11 +487,11 @@ bool BuildOutputTensors(const ::onnx::GraphProto& g,
 }
 
 bool BuildGraph(const ::onnx::GraphProto& g,
-                Graph& out_graph, 
-                std::string& out_error) 
+                Graph& out_graph,
+                std::string& out_error)
 {
     out_graph.set_name(g.name());
-    
+
     Graph::TensVecT input_tensors;
     if (!BuildInputTensors(g, input_tensors, out_error)) {
         return false;
@@ -610,20 +524,16 @@ bool BuildGraph(const ::onnx::GraphProto& g,
 }
 
 } // namespace detail
-  
+
 bool onnx::ImportOnnxToGraph(const std::string& path,
-                        ::onnx::ModelProto& input_model,
-                        Graph& out_graph,
-                        std::string& out_error)
+                             ::onnx::ModelProto& input_model,
+                             Graph& out_graph,
+                             std::string& out_error)
 {
     if (!onnx::LoadOnnxModel(path, input_model, out_error)) {
         return false;
     }
 
-    if (!ValidateOnnxModel(input_model, out_error)) {
-        return false;
-    }
-
     return detail::BuildGraph(input_model.graph(), out_graph, out_error);
 }
-}  // namespace tc::frontend
+} // namespace tc::frontend
