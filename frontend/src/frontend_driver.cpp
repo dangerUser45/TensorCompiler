@@ -20,12 +20,13 @@ struct Options final
     std::string input_path;
     std::string dump_path;
     bool verify = false;
+    bool dump_requested = false;
 };
 
-std::string BuildUsage(const char* argv0)
+inline std::string BuildUsage(const char* argv0)
 {
     return std::string("Usage: ") + argv0 +
-           " <model.onnx> [--verify] [--dump <output.dot>]";
+           " <model.onnx> [--verify] [--dump[=<output.dot>]]";
 }
 
 std::string BuildDefaultDumpPath(const std::string& input_path)
@@ -54,7 +55,7 @@ bool ParseArgs(int argc,
 
     static const option kLongOptions[] = {
         { "verify", no_argument, nullptr, 'v' },
-        { "dump", required_argument, nullptr, 'd' },
+        { "dump", optional_argument, nullptr, 'd' },
         { nullptr, 0, nullptr, 0 }
     };
 
@@ -63,17 +64,20 @@ bool ParseArgs(int argc,
 
     int opt = 0;
 
-    while ((opt = getopt_long(argc, argv, "vd:", kLongOptions, nullptr)) !=
+    while ((opt = getopt_long(argc, argv, "vd::", kLongOptions, nullptr)) !=
            -1) {
         switch (opt) {
             case 'v':
                 out_options.verify = true;
                 break;
             case 'd':
-                out_options.dump_path = optarg ? optarg : "";
-                if (out_options.dump_path.empty()) {
-                    out_error = "ERROR: --dump path is empty";
-                    return false;
+                out_options.dump_requested = true;
+                if (optarg != nullptr) {
+                    out_options.dump_path = optarg;
+                    if (out_options.dump_path.empty()) {
+                        out_error = "ERROR: --dump path is empty";
+                        return false;
+                    }
                 }
                 break;
             case '?':
@@ -87,15 +91,26 @@ bool ParseArgs(int argc,
         return false;
     }
 
-    out_options.input_path = argv[optind++];
+    out_options.input_path = argv[optind];
+    ++optind;
 
     if (optind < argc) {
-        out_error = "ERROR: multiple input files are not supported";
-        return false;
+        if (out_options.dump_requested && out_options.dump_path.empty() &&
+            (argc - optind) == 1) {
+            out_options.dump_path = argv[optind];
+        } else {
+            out_error = "ERROR: multiple input files are not supported";
+            return false;
+        }
     }
 
-    if (out_options.dump_path.empty()) {
+    if (out_options.dump_requested && out_options.dump_path.empty()) {
         out_options.dump_path = BuildDefaultDumpPath(out_options.input_path);
+    }
+
+    if (out_options.dump_requested && out_options.dump_path.empty()) {
+        out_error = "ERROR: --dump path resolution failed";
+        return false;
     }
 
     return true;
@@ -142,31 +157,33 @@ int main(int argc, char** argv)
         PrintVerifyReport(report);
     }
 
-    const std::filesystem::path dump_path(options.dump_path);
-    const std::filesystem::path parent_dir = dump_path.parent_path();
+    if (options.dump_requested) {
+        const std::filesystem::path dump_path(options.dump_path);
+        const std::filesystem::path parent_dir = dump_path.parent_path();
 
-    if (!parent_dir.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(parent_dir, ec);
-        if (ec) {
-            std::cerr << "ERROR: failed to create dump directory: "
-                      << parent_dir << " (" << ec.message() << ")\n";
+        if (!parent_dir.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(parent_dir, ec);
+            if (ec) {
+                std::cerr << "ERROR: failed to create dump directory: "
+                          << parent_dir << " (" << ec.message() << ")\n";
+                return 1;
+            }
+        }
+
+        std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
+        if (!out.is_open()) {
+            std::cerr << "ERROR: failed to open dump file: " << options.dump_path
+                      << '\n';
             return 1;
         }
+
+        tc::frontend::DumpGraph dumper(out);
+        dumper.dump(graph_ir);
+        out.close();
+
+        std::cout << "Graph dump written to: " << options.dump_path << '\n';
     }
-
-    std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
-    if (!out.is_open()) {
-        std::cerr << "ERROR: failed to open dump file: " << options.dump_path
-                  << '\n';
-        return 1;
-    }
-
-    tc::frontend::DumpGraph dumper(out);
-    dumper.dump(graph_ir);
-    out.close();
-
-    std::cout << "Graph dump written to: " << options.dump_path << '\n';
 
     if (options.verify && !verified) {
         return 2;
