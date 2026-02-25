@@ -1,0 +1,8 @@
+BasedOnStyle: Mozilla
+AccessModifierOffset: -4
+IndentWidth: 4
+TabWidth: 4
+ContinuationIndentWidth: 4
+AllowShortFunctionsOnASingleLine: None
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
