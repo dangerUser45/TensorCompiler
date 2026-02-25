@@ -1,7 +1,7 @@
 add_test(
   NAME end_to_end
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/end_to_end.sh
-          $<TARGET_FILE:Matrix>
+          $<TARGET_FILE:frontend_driver>
 )
 
 set_tests_properties(end_to_end PROPERTIES
