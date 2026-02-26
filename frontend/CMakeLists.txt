@@ -57,6 +57,9 @@ target_include_directories(tc_frontend_onnx PUBLIC
 target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
 
 add_executable(frontend_driver src/frontend_driver.cpp)
+target_compile_definitions(frontend_driver PRIVATE
+    TC_DEFAULT_DUMP_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/dump\" 
+)
 target_link_libraries(frontend_driver PRIVATE tc_frontend_onnx)
 
 enable_testing()

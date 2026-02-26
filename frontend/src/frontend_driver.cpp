@@ -1,12 +1,18 @@
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
+#include <getopt.h>
 #include <iostream>
 #include <string>
 
 #include "dump_graph.hpp"
 #include "graph_verifier.hpp"
+#include "onnx.pb.h"
 #include "onnx_importer.hpp"
 
+#ifndef TC_DEFAULT_DUMP_DIR
+#define TC_DEFAULT_DUMP_DIR "build/dump"
+#endif
 namespace {
 
 struct Options final
@@ -14,25 +20,29 @@ struct Options final
     std::string input_path;
     std::string dump_path;
     bool verify = false;
+    bool dump_requested = false;
 };
 
-std::string BuildUsage(const char* argv0)
+inline std::string BuildUsage(const char* argv0)
 {
     return std::string("Usage: ") + argv0 +
-           " <model.onnx> [--verify] [--dump <output.dot>]";
+           " <model.onnx> [--verify] [--dump[=<output.dot>]]";
 }
 
 std::string BuildDefaultDumpPath(const std::string& input_path)
 {
-    const std::size_t slash_pos = input_path.find_last_of("/\\");
-    const std::size_t dot_pos = input_path.find_last_of('.');
+    const std::filesystem::path input(input_path);
 
-    if (dot_pos == std::string::npos ||
-        (slash_pos != std::string::npos && dot_pos < slash_pos)) {
-        return input_path + ".dot";
+    std::string model_name = input.stem().string();
+
+    if (model_name.empty()) {
+        model_name = "model";
     }
 
-    return input_path.substr(0, dot_pos) + ".dot";
+    const std::filesystem::path out =
+        std::filesystem::path(TC_DEFAULT_DUMP_DIR) / (model_name + ".dot");
+
+    return out.string();
 }
 
 bool ParseArgs(int argc,
@@ -43,52 +53,64 @@ bool ParseArgs(int argc,
     out_options = Options{};
     out_error.clear();
 
-    if (argc < 2) {
-        out_error = BuildUsage(argv[0]);
+    static const option kLongOptions[] = {
+        { "verify", no_argument, nullptr, 'v' },
+        { "dump", optional_argument, nullptr, 'd' },
+        { nullptr, 0, nullptr, 0 }
+    };
+
+    opterr = 0;
+    optind = 1;
+
+    int opt = 0;
+
+    while ((opt = getopt_long(argc, argv, "vd::", kLongOptions, nullptr)) !=
+           -1) {
+        switch (opt) {
+            case 'v':
+                out_options.verify = true;
+                break;
+            case 'd':
+                out_options.dump_requested = true;
+                if (optarg != nullptr) {
+                    out_options.dump_path = optarg;
+                    if (out_options.dump_path.empty()) {
+                        out_error = "ERROR: --dump path is empty";
+                        return false;
+                    }
+                }
+                break;
+            case '?':
+                out_error = "ERROR: unknown option or missing value";
+                return false;
+        }
+    }
+
+    if (optind >= argc) {
+        out_error = "ERROR: model path is required";
         return false;
     }
 
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
+    out_options.input_path = argv[optind];
+    ++optind;
 
-        if (arg == "--verify") {
-            out_options.verify = true;
-            continue;
-        }
-
-        if (arg == "--dump") {
-            if (i + 1 >= argc) {
-                out_error = "ERROR: --dump requires output path";
-                return false;
-            }
-            out_options.dump_path = argv[++i];
-            if (out_options.dump_path.empty()) {
-                out_error = "ERROR: --dump path is empty";
-                return false;
-            }
-            continue;
-        }
-
-        if (arg.rfind("--", 0) == 0) {
-            out_error = "ERROR: unknown option: " + arg;
-            return false;
-        }
-
-        if (out_options.input_path.empty()) {
-            out_options.input_path = arg;
+    if (optind < argc) {
+        if (out_options.dump_requested && out_options.dump_path.empty() &&
+            (argc - optind) == 1) {
+            out_options.dump_path = argv[optind];
         } else {
             out_error = "ERROR: multiple input files are not supported";
             return false;
         }
     }
 
-    if (out_options.input_path.empty()) {
-        out_error = "ERROR: model path is required";
-        return false;
+    if (out_options.dump_requested && out_options.dump_path.empty()) {
+        out_options.dump_path = BuildDefaultDumpPath(out_options.input_path);
     }
 
-    if (out_options.dump_path.empty()) {
-        out_options.dump_path = BuildDefaultDumpPath(out_options.input_path);
+    if (out_options.dump_requested && out_options.dump_path.empty()) {
+        out_error = "ERROR: --dump path resolution failed";
+        return false;
     }
 
     return true;
@@ -135,18 +157,33 @@ int main(int argc, char** argv)
         PrintVerifyReport(report);
     }
 
-    std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
-    if (!out.is_open()) {
-        std::cerr << "ERROR: failed to open dump file: " << options.dump_path
-                  << '\n';
-        return 1;
+    if (options.dump_requested) {
+        const std::filesystem::path dump_path(options.dump_path);
+        const std::filesystem::path parent_dir = dump_path.parent_path();
+
+        if (!parent_dir.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(parent_dir, ec);
+            if (ec) {
+                std::cerr << "ERROR: failed to create dump directory: "
+                          << parent_dir << " (" << ec.message() << ")\n";
+                return 1;
+            }
+        }
+
+        std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
+        if (!out.is_open()) {
+            std::cerr << "ERROR: failed to open dump file: " << options.dump_path
+                      << '\n';
+            return 1;
+        }
+
+        tc::frontend::DumpGraph dumper(out);
+        dumper.dump(graph_ir);
+        out.close();
+
+        std::cout << "Graph dump written to: " << options.dump_path << '\n';
     }
-
-    tc::frontend::DumpGraph dumper(out);
-    dumper.dump(graph_ir);
-    out.close();
-
-    std::cout << "Graph dump written to: " << options.dump_path << '\n';
 
     if (options.verify && !verified) {
         return 2;

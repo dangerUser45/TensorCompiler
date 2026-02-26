@@ -7,7 +7,7 @@ Frontend отвечает за:
 
 ## Текущий pipeline
 
-`Load -> Import(IR) -> [Verify] -> Dump(.dot)`
+`Load -> Import(IR) -> [Verify] -> [Dump(.dot)]`
 
 - `Load/Import` — модуль импортера;
 - `Verify` — отдельный verifier;
@@ -43,18 +43,20 @@ cmake --build frontend/build -j4
 ## Использование driver
 
 ```bash
-./frontend/build/frontend_driver <model.onnx> [--verify] [--dump <output.dot>]
+./frontend/build/frontend_driver <model.onnx> [--verify] [--dump[=<output.dot>]]
 ```
 
 Опции:
 - `--verify` — запустить verifier и вывести диагностики
-- `--dump <output.dot>` — путь выходного `.dot` файла
-- если `--dump` не указан, используется `<input_without_ext>.dot`
+- `--dump` — включить генерацию `.dot` дампа с путем по умолчанию:
+  `${CMAKE_CURRENT_BINARY_DIR}/dump/<model_name>.dot`
+- `--dump=<output.dot>` — включить генерацию дампа и явно задать путь
+- `--dump <output.dot>` — также поддерживается
 
 Примеры:
 
 ```bash
-./frontend/build/frontend_driver frontend/models/single_relu.onnx
+./frontend/build/frontend_driver frontend/models/single_relu.onnx --dump
 ./frontend/build/frontend_driver frontend/models/two_transposes.onnx --verify
 ./frontend/build/frontend_driver frontend/models/single_relu.onnx --verify --dump /tmp/single_relu.dot
 ```
