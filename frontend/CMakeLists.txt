@@ -52,11 +52,15 @@ add_library(tc_frontend_onnx STATIC
 
 target_include_directories(tc_frontend_onnx PUBLIC
     include
+    tests/end-to-end/include
     "${PROTO_GEN_DIR}"
 )
 target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
 
-add_executable(frontend_driver src/frontend_driver.cpp)
+add_executable(frontend_driver
+    src/frontend_driver.cpp
+    tests/end-to-end/src/graph_hash.cpp    
+)
 target_link_libraries(frontend_driver PRIVATE tc_frontend_onnx)
 
 enable_testing()
