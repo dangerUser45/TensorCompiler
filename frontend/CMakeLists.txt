@@ -50,17 +50,32 @@ add_library(tc_frontend_onnx STATIC
     ${PROTO_SRCS}
 )
 
+add_library(project_warnings INTERFACE)
+target_compile_options(project_warnings INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
+)
+
 target_include_directories(tc_frontend_onnx PUBLIC
     include
+    tests/end2end/include
     "${PROTO_GEN_DIR}"
 )
-target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
 
-add_executable(frontend_driver src/frontend_driver.cpp)
+target_link_libraries(tc_frontend_onnx PUBLIC protobuf::libprotobuf)
+target_link_libraries(tc_frontend_onnx PRIVATE project_warnings)
+
+add_executable(frontend_driver
+    src/frontend_driver.cpp
+    tests/end2end/src/graph_hash.cpp    
+)
+
 target_compile_definitions(frontend_driver PRIVATE
     TC_DEFAULT_DUMP_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/dump\" 
 )
-target_link_libraries(frontend_driver PRIVATE tc_frontend_onnx)
+target_link_libraries(frontend_driver PRIVATE
+    tc_frontend_onnx
+    project_warnings
+)
 
 enable_testing()
 add_subdirectory(tests)

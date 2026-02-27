@@ -1,1 +1,1 @@
-add_subdirectory(end-to-end)
+add_subdirectory(end2end)
