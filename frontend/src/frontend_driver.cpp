@@ -113,8 +113,8 @@ bool ParseArgs(int argc,
         if (out_options.dump_requested && out_options.dump_path.empty() &&
             (argc - optind) == 1) {
             out_options.dump_path = argv[optind];
-        } else if (out_options.hash_requested && out_options.hash_path.empty() &&
-                   (argc - optind) == 1) {
+        } else if (out_options.hash_requested &&
+                   out_options.hash_path.empty() && (argc - optind) == 1) {
             out_options.hash_path = argv[optind];
         } else {
             out_error = "ERROR: multiple input files are not supported";
@@ -196,8 +196,8 @@ int main(int argc, char** argv)
 
         std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
-            std::cerr << "ERROR: failed to open dump file: " << options.dump_path
-                      << '\n';
+            std::cerr << "ERROR: failed to open dump file: "
+                      << options.dump_path << '\n';
             return 1;
         }
         tc::frontend::DumpGraph dumper(out);
@@ -214,8 +214,8 @@ int main(int argc, char** argv)
 
         std::ofstream out(options.hash_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
-            std::cerr << "ERROR: failed to open hash file: " << options.hash_path
-                      << '\n';
+            std::cerr << "ERROR: failed to open hash file: "
+                      << options.hash_path << '\n';
             return 1;
         }
 
