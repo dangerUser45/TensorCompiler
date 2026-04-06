@@ -10,3 +10,45 @@ set_tests_properties(end2end PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+find_package(GTest CONFIG QUIET)
+find_package(GTest QUIET)
+
+if (NOT TARGET GTest::gtest_main)
+  set(LOCAL_GTEST_ROOT "$ENV{HOME}/Desktop/libs/googletest")
+  if (EXISTS "${LOCAL_GTEST_ROOT}/CMakeLists.txt")
+    add_subdirectory(
+      "${LOCAL_GTEST_ROOT}"
+      "${CMAKE_BINARY_DIR}/_deps/local-googletest"
+      EXCLUDE_FROM_ALL
+    )
+  endif()
+endif()
+
+if (TARGET GTest::gtest_main)
+  set(TC_GTEST_MAIN_TARGET GTest::gtest_main)
+elseif (TARGET gtest_main)
+  set(TC_GTEST_MAIN_TARGET gtest_main)
+else()
+  message(FATAL_ERROR "gtest_main target not found. Install GTest or provide ~/Desktop/libs/googletest")
+endif()
+
+add_executable(unsupported_op_test
+  src/unsupported_op_test.cpp
+)
+target_link_libraries(unsupported_op_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME unsupported_op
+  COMMAND unsupported_op_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/candy-8.onnx
+)
+
+set_tests_properties(unsupported_op PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

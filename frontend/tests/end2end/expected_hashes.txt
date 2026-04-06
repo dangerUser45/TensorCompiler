@@ -1,4 +1,2 @@
-candy-8.onnx               f99624ccd7994911
 single_relu.onnx           25afdc0b67d9980c
-squeezenet1.0-12-int8.onnx 22ee01bfbc77c48e
 two_transposes.onnx        52ed9ec117aeef7a
