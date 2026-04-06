@@ -49,32 +49,6 @@ fi
 mkdir -p "${HASH_DIR}"
 : > "${ACTUAL_FILE}"
 
-shopt -s nullglob
-models=( "${MODELS_DIR}"/*.onnx )
-shopt -u nullglob
-
-if [[ ${#models[@]} -eq 0 ]]; then
-  echo "ERROR: no .onnx models found in ${MODELS_DIR}" >&2
-  exit 1
-fi
-
-for model_path in "${models[@]}"; do
-  model_file="$(basename -- "${model_path}")"
-  hash_file="${HASH_DIR}/${model_file%.onnx}.hash"
-
-  "${DRIVER_BIN}" "${model_path}" --hash="${hash_file}" >/dev/null
-
-  hash_value="$(tr -d '[:space:]' < "${hash_file}")"
-  if [[ -z "${hash_value}" ]]; then
-    echo "ERROR: empty hash for ${model_file}" >&2
-    exit 1
-  fi
-
-  printf "%s %s\n" "${model_file}" "${hash_value}" >> "${ACTUAL_FILE}"
-done
-
-sort -o "${ACTUAL_FILE}" "${ACTUAL_FILE}"
-
 awk '
   BEGIN { FS = "[[:space:]]+" }
   /^[[:space:]]*#/ { next }
@@ -85,6 +59,32 @@ awk '
   }
   { print $1, $2 }
 ' "${EXPECTED_FILE}" | sort > "${NORMALIZED_EXPECTED}"
+
+if [[ ! -s "${NORMALIZED_EXPECTED}" ]]; then
+  echo "ERROR: expected hashes file has no model entries: ${EXPECTED_FILE}" >&2
+  exit 1
+fi
+
+while read -r model_file _expected_hash; do
+  model_path="${MODELS_DIR}/${model_file}"
+  if [[ ! -f "${model_path}" ]]; then
+    echo "ERROR: model listed in expected hashes is missing: ${model_path}" >&2
+    exit 1
+  fi
+
+  hash_file="${HASH_DIR}/${model_file%.onnx}.hash"
+  "${DRIVER_BIN}" "${model_path}" --hash="${hash_file}" >/dev/null
+
+  hash_value="$(tr -d '[:space:]' < "${hash_file}")"
+  if [[ -z "${hash_value}" ]]; then
+    echo "ERROR: empty hash for ${model_file}" >&2
+    exit 1
+  fi
+
+  printf "%s %s\n" "${model_file}" "${hash_value}" >> "${ACTUAL_FILE}"
+done < "${NORMALIZED_EXPECTED}"
+
+sort -o "${ACTUAL_FILE}" "${ACTUAL_FILE}"
 
 if diff -u "${NORMALIZED_EXPECTED}" "${ACTUAL_FILE}"; then
   echo "E2E hash check: OK"
