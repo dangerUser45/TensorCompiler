@@ -48,18 +48,6 @@ bool onnx::LoadOnnxModel(const std::string& path,
 
 namespace detail {
 
-bool IsSupportedMvpOperator(const std::string& op_type)
-{
-    static const std::unordered_set<std::string> kSupportedOps = {
-        "Relu",
-        "Add",
-        "MatMul",
-        "Transpose",
-    };
-
-    return kSupportedOps.find(op_type) != kSupportedOps.end();
-}
-
 bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi,
                             std::vector<int64_t>& out_shape,
                             std::string& /*out_error*/)
@@ -384,20 +372,22 @@ bool ParseNode(const ::onnx::NodeProto& src,
 {
     const std::string node_context = BuildNodeContext(src, node_index);
     const std::string& op_type = src.op_type();
+    const OpKind op_kind = OpKindFromString(op_type);
 
     if (op_type.empty()) {
         return SetError(out_error, "ERROR: " + node_context + " has empty op");
     }
 
-    if (!IsSupportedMvpOperator(op_type)) {
-        return SetError(
-            out_error,
-            "ERROR: " + node_context + " unsupported operator: " + op_type);
+    if (op_kind == OpKind::kUnknown) {
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " unsupported operator: " + op_type);
     }
 
     auto node = std::make_unique<Node>();
     node->set_name_node(src.name());
     node->set_name_op(op_type);
+    node->set_op_kind(op_kind);
 
     std::vector<std::string> inputs;
     inputs.reserve(src.input_size());

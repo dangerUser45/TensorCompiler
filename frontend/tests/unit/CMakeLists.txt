@@ -42,3 +42,27 @@ set_tests_properties(op_kind_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(importer_op_kind_test
+  importer_op_kind_test.cpp
+)
+
+target_link_libraries(importer_op_kind_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+target_compile_definitions(importer_op_kind_test PRIVATE
+  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+)
+
+add_test(
+  NAME importer_op_kind_test
+  COMMAND importer_op_kind_test
+)
+
+set_tests_properties(importer_op_kind_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
