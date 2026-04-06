@@ -40,6 +40,68 @@ public:
     }
 
 private:
+    void AddArityError(const std::string& node_context,
+                       tc::frontend::OpKind op_kind,
+                       const char* field_name,
+                       std::size_t expected,
+                       std::size_t got)
+    {
+        report_.add_error("ERROR: " + node_context + " op '" +
+                          std::string(tc::frontend::ToString(op_kind)) +
+                          "' expects " + std::to_string(expected) + " " +
+                          field_name + ", got " + std::to_string(got));
+    }
+
+    void ValidateNodeSemantics(const tc::frontend::Node& node,
+                               const std::string& node_context)
+    {
+        const auto op_kind = node.get_op_kind();
+        const std::size_t input_count = node.get_inputs().size();
+        const std::size_t output_count = node.get_outputs().size();
+
+        if (op_kind == tc::frontend::OpKind::kUnknown) {
+            report_.add_error("ERROR: " + node_context +
+                              " has unknown op kind");
+            return;
+        }
+
+        switch (op_kind) {
+            case tc::frontend::OpKind::kRelu:
+                if (input_count != 1) {
+                    AddArityError(
+                        node_context, op_kind, "input(s)", 1, input_count);
+                }
+                if (output_count != 1) {
+                    AddArityError(
+                        node_context, op_kind, "output(s)", 1, output_count);
+                }
+                break;
+            case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMatMul:
+                if (input_count != 2) {
+                    AddArityError(
+                        node_context, op_kind, "input(s)", 2, input_count);
+                }
+                if (output_count != 1) {
+                    AddArityError(
+                        node_context, op_kind, "output(s)", 1, output_count);
+                }
+                break;
+            case tc::frontend::OpKind::kTranspose:
+                if (input_count != 1) {
+                    AddArityError(
+                        node_context, op_kind, "input(s)", 1, input_count);
+                }
+                if (output_count != 1) {
+                    AddArityError(
+                        node_context, op_kind, "output(s)", 1, output_count);
+                }
+                break;
+            case tc::frontend::OpKind::kUnknown:
+                break;
+        }
+    }
+
     void VisitOutputTensors(const tc::frontend::Graph::TensVecT& outputs)
     {
         for (std::size_t i = 0; i < outputs.size(); ++i) {
@@ -103,6 +165,8 @@ private:
             if (node.get_name_op().empty()) {
                 report_.add_error("ERROR: " + node_context + " has no op type");
             }
+
+            ValidateNodeSemantics(node, node_context);
 
             std::unordered_set<std::string> local_outputs;
             local_outputs.reserve(node.get_outputs().size());

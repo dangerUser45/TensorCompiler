@@ -66,3 +66,23 @@ set_tests_properties(importer_op_kind_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(graph_verifier_semantic_test
+  graph_verifier_semantic_test.cpp
+)
+
+target_link_libraries(graph_verifier_semantic_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME graph_verifier_semantic_test
+  COMMAND graph_verifier_semantic_test
+)
+
+set_tests_properties(graph_verifier_semantic_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
