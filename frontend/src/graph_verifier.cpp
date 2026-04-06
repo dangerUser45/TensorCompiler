@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace {
@@ -99,6 +100,105 @@ private:
                 break;
             case tc::frontend::OpKind::kUnknown:
                 break;
+        }
+
+        ValidateNodeAttributes(node, node_context);
+    }
+
+    void ValidateNodeAttributes(const tc::frontend::Node& node,
+                                const std::string& node_context)
+    {
+        const auto op_kind = node.get_op_kind();
+        const auto& attrs = node.get_attrs();
+
+        std::unordered_map<std::string, const tc::frontend::Attribute*>
+            attrs_by_name;
+        attrs_by_name.reserve(attrs.size());
+
+        for (std::size_t i = 0; i < attrs.size(); ++i) {
+            if (!attrs[i]) {
+                report_.add_error("ERROR: " + node_context + ".attribute[" +
+                                  std::to_string(i) + "] is null");
+                continue;
+            }
+
+            const std::string& attr_name = attrs[i]->get_name();
+            if (attr_name.empty()) {
+                report_.add_error("ERROR: " + node_context + ".attribute[" +
+                                  std::to_string(i) + "] has empty name");
+                continue;
+            }
+
+            if (!attrs_by_name.emplace(attr_name, attrs[i].get()).second) {
+                report_.add_error("ERROR: " + node_context +
+                                  " has duplicate attribute '" + attr_name +
+                                  "'");
+                continue;
+            }
+
+            switch (op_kind) {
+                case tc::frontend::OpKind::kRelu:
+                case tc::frontend::OpKind::kAdd:
+                case tc::frontend::OpKind::kMatMul:
+                    report_.add_error(
+                        "ERROR: " + node_context + " op '" +
+                        std::string(tc::frontend::ToString(op_kind)) +
+                        "' does not support attributes");
+                    break;
+
+                case tc::frontend::OpKind::kTranspose:
+                    if (attr_name != "perm") {
+                        report_.add_error(
+                            "ERROR: " + node_context +
+                            " op 'Transpose' has unsupported attribute '" +
+                            attr_name + "'");
+                    }
+                    break;
+
+                case tc::frontend::OpKind::kUnknown:
+                    break;
+            }
+        }
+
+        if (op_kind != tc::frontend::OpKind::kTranspose) {
+            return;
+        }
+
+        const auto perm_it = attrs_by_name.find("perm");
+        if (perm_it == attrs_by_name.end()) {
+            return;
+        }
+
+        const auto* perm_attr = perm_it->second;
+        if (perm_attr->get_data_type().id != tc::frontend::DataID::INT64) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Transpose' attribute 'perm' must be INTS");
+            return;
+        }
+
+        const auto& perm = perm_attr->get_values<int64_t>();
+        if (perm.empty()) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Transpose' attribute 'perm' is empty");
+            return;
+        }
+
+        std::unordered_set<int64_t> seen_axes;
+        seen_axes.reserve(perm.size());
+        for (const int64_t axis : perm) {
+            if (axis < 0) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'Transpose' attribute 'perm' contains "
+                                  "negative axis " +
+                                  std::to_string(axis));
+            }
+
+            if (!seen_axes.insert(axis).second) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'Transpose' attribute 'perm' has "
+                                  "duplicate axis " +
+                                  std::to_string(axis));
+            }
         }
     }
 

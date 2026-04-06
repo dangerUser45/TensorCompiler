@@ -22,7 +22,8 @@ bool HasDiagnosticContaining(const tc::frontend::verify::Report& report,
 tc::frontend::Graph MakeSingleNodeGraph(tc::frontend::OpKind op_kind,
                                         std::string op_name,
                                         std::vector<std::string> inputs,
-                                        std::vector<std::string> outputs)
+                                        std::vector<std::string> outputs,
+                                        tc::frontend::Node::AttrVecT attrs = {})
 {
     tc::frontend::Graph graph;
     graph.set_name("semantic_graph");
@@ -34,6 +35,7 @@ tc::frontend::Graph MakeSingleNodeGraph(tc::frontend::OpKind op_kind,
     node->set_op_kind(op_kind);
     node->set_inputs(std::move(inputs));
     node->set_outputs(outputs);
+    node->set_attr(std::move(attrs));
     nodes.push_back(std::move(node));
     graph.set_nodes(std::move(nodes));
 
@@ -48,6 +50,26 @@ tc::frontend::Graph MakeSingleNodeGraph(tc::frontend::OpKind op_kind,
     graph.set_output_tensors(std::move(output_tensors));
 
     return graph;
+}
+
+std::unique_ptr<tc::frontend::Attribute> MakeIntsAttr(
+    std::string name,
+    std::vector<int64_t> values)
+{
+    auto attr = std::make_unique<tc::frontend::Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<int64_t>(std::move(values));
+    return attr;
+}
+
+std::unique_ptr<tc::frontend::Attribute> MakeFloatsAttr(
+    std::string name,
+    std::vector<float> values)
+{
+    auto attr = std::make_unique<tc::frontend::Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<float>(std::move(values));
+    return attr;
 }
 
 TEST(GraphVerifierSemantic, ValidReluGraphPasses)
@@ -80,6 +102,57 @@ TEST(GraphVerifierSemantic, UnknownOpKindFails)
     EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
     EXPECT_TRUE(HasDiagnosticContaining(report, "unknown op kind"))
         << "missing unknown op kind diagnostic";
+}
+
+TEST(GraphVerifierSemantic, ReluWithUnexpectedAttributeFails)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeFloatsAttr("alpha", { 1.0f }));
+
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     std::move(attrs));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "does not support attributes"))
+        << "missing unexpected attribute diagnostic";
+}
+
+TEST(GraphVerifierSemantic, TransposeWithNegativePermFails)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("perm", { 0, -1 }));
+
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kTranspose,
+                                     "Transpose",
+                                     { "x" },
+                                     { "y" },
+                                     std::move(attrs));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "contains negative axis"))
+        << "missing negative perm diagnostic";
+}
+
+TEST(GraphVerifierSemantic, TransposeWithDuplicatePermFails)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("perm", { 1, 1 }));
+
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kTranspose,
+                                     "Transpose",
+                                     { "x" },
+                                     { "y" },
+                                     std::move(attrs));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "has duplicate axis"))
+        << "missing duplicate perm diagnostic";
 }
 
 } // namespace

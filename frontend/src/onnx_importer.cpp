@@ -437,6 +437,68 @@ bool BuildNodeAttributes(const ::onnx::NodeProto& src,
     return true;
 }
 
+bool NormalizeNodeAttributes(OpKind op_kind,
+                             Node::AttrVecT& attrs,
+                             std::string& out_error,
+                             const std::string& node_context)
+{
+    std::unordered_set<std::string> seen_names;
+    seen_names.reserve(attrs.size());
+
+    for (std::size_t i = 0; i < attrs.size(); ++i) {
+        if (!attrs[i]) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] is null");
+        }
+
+        const std::string& attr_name = attrs[i]->get_name();
+        if (attr_name.empty()) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] has empty name");
+        }
+
+        if (!seen_names.insert(attr_name).second) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " has duplicate attribute '" + attr_name + "'");
+        }
+
+        switch (op_kind) {
+            case OpKind::kRelu:
+            case OpKind::kAdd:
+            case OpKind::kMatMul:
+                return SetError(out_error,
+                                "ERROR: " + node_context + " op '" +
+                                    std::string(ToString(op_kind)) +
+                                    "' does not support attribute '" +
+                                    attr_name + "'");
+
+            case OpKind::kTranspose:
+                if (attr_name != "perm") {
+                    return SetError(out_error,
+                                    "ERROR: " + node_context +
+                                        " op 'Transpose' has "
+                                        "unsupported attribute '" +
+                                        attr_name + "'");
+                }
+                if (attrs[i]->get_data_type().id != DataID::INT64) {
+                    return SetError(
+                        out_error,
+                        "ERROR: " + node_context +
+                            " op 'Transpose' attribute 'perm' must be INTS");
+                }
+                break;
+
+            case OpKind::kUnknown:
+                break;
+        }
+    }
+
+    return true;
+}
+
 bool ParseNode(const ::onnx::NodeProto& src,
                std::unique_ptr<Node>& out_node,
                std::string& out_error,
@@ -477,6 +539,9 @@ bool ParseNode(const ::onnx::NodeProto& src,
 
     Node::AttrVecT attrs;
     if (!BuildNodeAttributes(src, attrs, out_error, node_context)) {
+        return false;
+    }
+    if (!NormalizeNodeAttributes(op_kind, attrs, out_error, node_context)) {
         return false;
     }
     node->set_attr(std::move(attrs));
