@@ -9,31 +9,30 @@
 #include <variant>
 #include <vector>
 
+#include "op_kind.hpp"
 #include "type_info.hpp"
 
 namespace tc::frontend {
 
-using TensorData = std::variant<
-    std::monostate,
+using TensorData = std::variant<std::monostate,
 
-    std::vector<int8_t>,
-    std::vector<int16_t>,
-    std::vector<int32_t>,
-    std::vector<int64_t>,
+                                std::vector<int8_t>,
+                                std::vector<int16_t>,
+                                std::vector<int32_t>,
+                                std::vector<int64_t>,
 
-    std::vector<uint8_t>,
-    std::vector<uint32_t>,
-    std::vector<uint16_t>,
-    std::vector<uint64_t>,
+                                std::vector<uint8_t>,
+                                std::vector<uint32_t>,
+                                std::vector<uint16_t>,
+                                std::vector<uint64_t>,
 
-    std::vector<float>,
-    std::vector<double>,
+                                std::vector<float>,
+                                std::vector<double>,
 
-    std::vector<std::complex<float>>,
-    std::vector<std::complex<double>>,
+                                std::vector<std::complex<float>>,
+                                std::vector<std::complex<double>>,
 
-    std::vector<std::string>
->;
+                                std::vector<std::string>>;
 
 class TensorInfo
 {
@@ -168,6 +167,10 @@ public:
     {
         return name_op_;
     }
+    OpKind get_op_kind() const noexcept
+    {
+        return op_kind_;
+    }
     const std::vector<std::string>& get_inputs() const noexcept
     {
         return inputs_;
@@ -189,6 +192,10 @@ public:
     {
         name_op_ = std::move(name_op);
     }
+    void set_op_kind(OpKind op_kind) noexcept
+    {
+        op_kind_ = op_kind;
+    }
     void set_inputs(std::vector<std::string> inputs)
     {
         inputs_ = std::move(inputs);
@@ -205,6 +212,7 @@ public:
 private:
     std::string name_node_;
     std::string name_op_;
+    OpKind op_kind_ = OpKind::kUnknown;
 
     std::vector<std::string> inputs_;
     std::vector<std::string> outputs_;
