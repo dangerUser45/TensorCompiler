@@ -1,2 +1,2 @@
-single_relu.onnx           25afdc0b67d9980c
-two_transposes.onnx        52ed9ec117aeef7a
+single_relu.onnx           6e7e78b14b4b2c06
+two_transposes.onnx        7b36a3ce25427d69

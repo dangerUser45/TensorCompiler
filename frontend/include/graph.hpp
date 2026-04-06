@@ -63,6 +63,10 @@ public:
     {
         shape_ = std::move(shape);
     }
+    void set_data_type(DataT data_type)
+    {
+        data_type_ = std::move(data_type);
+    }
 
     DataT get_data_type() const noexcept
     {

@@ -86,3 +86,27 @@ set_tests_properties(graph_verifier_semantic_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(importer_tensor_contract_test
+  importer_tensor_contract_test.cpp
+)
+
+target_link_libraries(importer_tensor_contract_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+target_compile_definitions(importer_tensor_contract_test PRIVATE
+  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+)
+
+add_test(
+  NAME importer_tensor_contract_test
+  COMMAND importer_tensor_contract_test
+)
+
+set_tests_properties(importer_tensor_contract_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

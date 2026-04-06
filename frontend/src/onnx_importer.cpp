@@ -74,6 +74,78 @@ bool ParseDimsFromValueInfo(const ::onnx::ValueInfoProto& vi,
     return true;
 }
 
+bool ConvertOnnxElemTypeToDataType(int elem_type,
+                                   DataT& out_type,
+                                   std::string& out_error,
+                                   const std::string& tensor_context)
+{
+    const auto type = static_cast<::onnx::TensorProto_DataType>(elem_type);
+    switch (type) {
+        case ::onnx::TensorProto_DataType_FLOAT:
+            out_type = TypeInfo<float>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_DOUBLE:
+            out_type = TypeInfo<double>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_INT8:
+            out_type = TypeInfo<int8_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_INT16:
+            out_type = TypeInfo<int16_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_INT32:
+            out_type = TypeInfo<int32_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_INT64:
+            out_type = TypeInfo<int64_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_UINT8:
+            out_type = TypeInfo<uint8_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_UINT16:
+            out_type = TypeInfo<uint16_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_UINT32:
+            out_type = TypeInfo<uint32_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_UINT64:
+            out_type = TypeInfo<uint64_t>::type;
+            return true;
+        case ::onnx::TensorProto_DataType_STRING:
+            out_type = TypeInfo<std::string>::type;
+            return true;
+        default:
+            break;
+    }
+
+    return SetError(out_error,
+                    "ERROR: " + tensor_context +
+                        " has unsupported elem_type: " +
+                        ::onnx::TensorProto_DataType_Name(type));
+}
+
+bool ParseTensorMetaFromValueInfo(const ::onnx::ValueInfoProto& vi,
+                                  std::vector<int64_t>& out_shape,
+                                  DataT& out_data_type,
+                                  std::string& out_error,
+                                  const std::string& tensor_context)
+{
+    if (!ParseDimsFromValueInfo(vi, out_shape, out_error)) {
+        return false;
+    }
+
+    out_data_type = DataT{};
+    if (!vi.has_type() || !vi.type().has_tensor_type() ||
+        !vi.type().tensor_type().has_elem_type()) {
+        return true;
+    }
+
+    return ConvertOnnxElemTypeToDataType(vi.type().tensor_type().elem_type(),
+                                         out_data_type,
+                                         out_error,
+                                         tensor_context);
+}
+
 template<typename T>
 bool ParseRawVector(const std::string& raw,
                     std::vector<T>& out,
@@ -457,13 +529,16 @@ bool BuildInputTensors(const ::onnx::GraphProto& g,
         }
 
         std::vector<int64_t> shape;
-        if (!ParseDimsFromValueInfo(in, shape, out_error)) {
+        DataT data_type;
+        if (!ParseTensorMetaFromValueInfo(
+                in, shape, data_type, out_error, "input '" + in.name() + "'")) {
             return false;
         }
 
         auto t = std::make_unique<TensorInfo>();
         t->set_name(in.name());
         t->set_shape(shape);
+        t->set_data_type(data_type);
         out_inputs.push_back(std::move(t));
     }
     return true;
@@ -486,13 +561,19 @@ bool BuildOutputTensors(const ::onnx::GraphProto& g,
         }
 
         std::vector<int64_t> shape;
-        if (!ParseDimsFromValueInfo(out, shape, out_error)) {
+        DataT data_type;
+        if (!ParseTensorMetaFromValueInfo(out,
+                                          shape,
+                                          data_type,
+                                          out_error,
+                                          "output '" + out.name() + "'")) {
             return false;
         }
 
         auto t = std::make_unique<TensorInfo>();
         t->set_name(out.name());
         t->set_shape(shape);
+        t->set_data_type(data_type);
         out_outputs.push_back(std::move(t));
     }
 
