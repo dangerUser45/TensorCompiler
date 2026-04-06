@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libgtest-dev \
+            clang-format
+
+      - name: Configure
+        run: |
+          cmake -S frontend -B frontend/build-${{ matrix.build_type }} \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build frontend/build-${{ matrix.build_type }} --parallel
+
+      - name: Test
+        run: ctest --test-dir frontend/build-${{ matrix.build_type }} --output-on-failure
+
+  clang-format-check:
+    name: Clang-Format (PR to dev/main)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          mapfile -t files < <(git ls-files | grep -E '^frontend/.*\.(cpp|hpp)$' || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No C++ source files found"
+            exit 0
+          fi
+
+          clang-format -style=file -i "${files[@]}"
+
+          if ! git diff --exit-code -- "${files[@]}"; then
+            echo "Formatting check failed. Run:"
+            echo "  clang-format -style=file -i frontend/include/*.hpp frontend/src/*.cpp frontend/tests/**/*.cpp"
+            exit 1
+          fi
