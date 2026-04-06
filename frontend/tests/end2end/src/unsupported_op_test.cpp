@@ -39,8 +39,8 @@ std::string ShellQuote(const std::string& value)
 std::string ReadFileToString(const std::filesystem::path& path)
 {
     std::ifstream input(path);
-    return std::string(
-        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
 }
 
 int DecodeExitCode(int system_status)
@@ -56,9 +56,10 @@ int DecodeExitCode(int system_status)
 
 std::string ToLower(std::string value)
 {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(
+        value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
     return value;
 }
 
@@ -107,9 +108,9 @@ TEST(UnsupportedOperator, FailsWithClearDiagnostic)
         std::filesystem::temp_directory_path() /
         ("tc_unsupported_op_" + std::to_string(getpid()) + ".log");
 
-    const std::string command =
-        ShellQuote(g_config.driver_path) + " " + ShellQuote(g_config.model_path) +
-        " >" + ShellQuote(tmp_output.string()) + " 2>&1";
+    const std::string command = ShellQuote(g_config.driver_path) + " " +
+                                ShellQuote(g_config.model_path) + " >" +
+                                ShellQuote(tmp_output.string()) + " 2>&1";
 
     const int system_status = std::system(command.c_str());
     const int exit_code = DecodeExitCode(system_status);
