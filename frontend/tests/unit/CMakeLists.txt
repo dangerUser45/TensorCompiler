@@ -110,3 +110,23 @@ set_tests_properties(importer_tensor_contract_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(importer_attr_normalization_test
+  importer_attr_normalization_test.cpp
+)
+
+target_link_libraries(importer_attr_normalization_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME importer_attr_normalization_test
+  COMMAND importer_attr_normalization_test
+)
+
+set_tests_properties(importer_attr_normalization_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
