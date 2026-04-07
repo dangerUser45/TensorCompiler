@@ -12,6 +12,7 @@ struct BackendDiagnostic final
 };
 
 std::string FormatBackendDiagnostic(const BackendDiagnostic& diagnostic);
+std::string GetDefaultLlvmLoweringPassPipeline();
 
 class ParsedMlirModule final
 {
@@ -32,15 +33,29 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
+    friend bool LowerMlirModuleToLlvmDialect(ParsedMlirModule& module,
+                                             BackendDiagnostic& out_diagnostic,
+                                             const std::string& pass_pipeline);
     friend bool ParseMlirModuleFromString(const std::string& source,
                                           const std::string& source_name,
                                           ParsedMlirModule& out_module,
                                           BackendDiagnostic& out_diagnostic);
+    friend bool RunMlirPassPipeline(ParsedMlirModule& module,
+                                    const std::string& pass_pipeline,
+                                    BackendDiagnostic& out_diagnostic);
 };
 
 bool ParseMlirModuleFromString(const std::string& source,
                                const std::string& source_name,
                                ParsedMlirModule& out_module,
                                BackendDiagnostic& out_diagnostic);
+
+bool RunMlirPassPipeline(ParsedMlirModule& module,
+                         const std::string& pass_pipeline,
+                         BackendDiagnostic& out_diagnostic);
+
+bool LowerMlirModuleToLlvmDialect(ParsedMlirModule& module,
+                                  BackendDiagnostic& out_diagnostic,
+                                  const std::string& pass_pipeline = {});
 
 } // namespace tc::backend

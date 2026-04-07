@@ -1,8 +1,8 @@
 #include <iostream>
 #include <string>
 
-#include "tc/backend/llvm_target_init.hpp"
-#include "tc/backend/mlir_context.hpp"
+#include "llvm_target_init.hpp"
+#include "mlir_context.hpp"
 
 int main()
 {
