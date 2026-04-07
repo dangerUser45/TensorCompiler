@@ -71,10 +71,17 @@ if (MLIR_FOUND)
     target_link_libraries(tc_backend PRIVATE
         MLIRArithDialect
         MLIRAsmParser
+        MLIRControlFlowDialect
         MLIRFuncDialect
+        MLIRIndexDialect
         MLIRIR
+        MLIRLLVMDialect
         MLIRLinalgDialect
+        MLIRMemRefDialect
+        MLIRPass
         MLIRParser
+        MLIRRegisterAllExtensions
+        MLIRRegisterAllPasses
         MLIRSupport
         MLIRTensorDialect
     )
