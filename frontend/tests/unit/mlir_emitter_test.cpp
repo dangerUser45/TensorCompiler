@@ -105,3 +105,32 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
         << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
+
+TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/two_transposes.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<2x3x4xf32>) -> "
+                             "tensor<3x2x4xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=Transpose"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}

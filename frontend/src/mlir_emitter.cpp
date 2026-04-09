@@ -93,34 +93,39 @@ bool BuildMlirTensorType(const tc::frontend::TensorInfo& tensor,
     return true;
 }
 
-bool CanEmitSimpleReluEntry(const tc::frontend::Graph& graph) noexcept
+bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
 {
     if (graph.get_input_tensors().size() != 1 ||
-        graph.get_output_tensors().size() != 1 ||
-        graph.get_nodes().size() != 1) {
+        graph.get_output_tensors().size() != 1 || graph.get_nodes().empty()) {
         return false;
     }
 
-    const auto& node = *graph.get_nodes().front();
-    if (node.get_op_kind() != tc::frontend::OpKind::kRelu) {
-        return false;
-    }
-    if (node.get_inputs().size() != 1 || node.get_outputs().size() != 1) {
-        return false;
+    for (const auto& node_ptr : graph.get_nodes()) {
+        if (!node_ptr) {
+            return false;
+        }
+        const auto kind = node_ptr->get_op_kind();
+        if (kind != tc::frontend::OpKind::kRelu &&
+            kind != tc::frontend::OpKind::kTranspose) {
+            return false;
+        }
+        if (node_ptr->get_inputs().size() != 1 ||
+            node_ptr->get_outputs().size() != 1) {
+            return false;
+        }
     }
     return true;
 }
 
-bool EmitSimpleReluMain(const tc::frontend::Graph& graph,
-                        std::string& out_mlir_text,
-                        std::string& out_error)
+bool EmitSimpleMain(const tc::frontend::Graph& graph,
+                    std::string& out_mlir_text,
+                    std::string& out_error)
 {
     out_mlir_text.clear();
     out_error.clear();
 
     const auto& input = *graph.get_input_tensors().front();
     const auto& output = *graph.get_output_tensors().front();
-    const auto& node = *graph.get_nodes().front();
 
     std::string input_ty;
     std::string output_ty;
@@ -131,22 +136,29 @@ bool EmitSimpleReluMain(const tc::frontend::Graph& graph,
         return false;
     }
 
-    if (input_ty != output_ty) {
-        out_error =
-            "ERROR: simple Relu MLIR emission requires matching input/output "
-            "types";
-        return false;
-    }
-
     std::ostringstream out;
     out << "module {\n";
     out << "  // tc.graph: " << GraphNameOrFallback(graph) << '\n';
     out << "  // tc.node_count: " << graph.get_nodes().size() << '\n';
     out << "  func.func @main(%arg0: " << input_ty << ") -> " << output_ty
         << " {\n";
-    out << "    // tc.node[0]: op=Relu, name=" << NodeNameOrFallback(node)
-        << '\n';
-    out << "    return %arg0 : " << output_ty << '\n';
+
+    for (std::size_t i = 0; i < graph.get_nodes().size(); ++i) {
+        const auto& node = *graph.get_nodes()[i];
+        out << "    // tc.node[" << i
+            << "]: op=" << ToString(node.get_op_kind())
+            << ", name=" << NodeNameOrFallback(node) << '\n';
+    }
+
+    std::string current_value = "%arg0";
+    std::string current_type = input_ty;
+    if (current_type != output_ty) {
+        out << "    %0 = builtin.unrealized_conversion_cast " << current_value
+            << " : " << current_type << " to " << output_ty << '\n';
+        current_value = "%0";
+        current_type = output_ty;
+    }
+    out << "    return " << current_value << " : " << output_ty << '\n';
     out << "  }\n";
     out << "}\n";
 
@@ -165,8 +177,8 @@ bool EmitMlirModuleSkeleton(const Graph& graph,
     out_mlir_text.clear();
     out_error.clear();
 
-    if (CanEmitSimpleReluEntry(graph)) {
-        return EmitSimpleReluMain(graph, out_mlir_text, out_error);
+    if (CanEmitSimpleEntry(graph)) {
+        return EmitSimpleMain(graph, out_mlir_text, out_error);
     }
 
     std::ostringstream out;
