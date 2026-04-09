@@ -29,6 +29,45 @@ tc::frontend::Graph MakeSingleReluGraph()
     return graph;
 }
 
+std::unique_ptr<tc::frontend::TensorInfo> MakeTensor(std::string name,
+                                                     std::vector<int64_t> shape,
+                                                     tc::frontend::DataID id)
+{
+    auto tensor = std::make_unique<tc::frontend::TensorInfo>();
+    tensor->set_name(std::move(name));
+    tensor->set_shape(std::move(shape));
+    tensor->set_data_type({ id, "" });
+    return tensor;
+}
+
+tc::frontend::Graph MakeSingleAddGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("add_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(MakeTensor("x", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    inputs.push_back(MakeTensor("y", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(MakeTensor("z", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("add_0");
+    node->set_name_op("Add");
+    node->set_op_kind(tc::frontend::OpKind::kAdd);
+    node->set_inputs({ "x", "y" });
+    node->set_outputs({ "z" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
 } // namespace
 
 TEST(MlirEmitter, EmitsDeterministicSkeletonForSingleNodeGraph)
@@ -133,4 +172,35 @@ TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
         << mlir_text;
     EXPECT_NE(mlir_text.find("op=Transpose"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, AddGraphEmitsTypedMainWithTwoArguments)
+{
+    const auto graph = MakeSingleAddGraph();
+    ASSERT_EQ(graph.get_input_tensors().size(), 2u);
+    ASSERT_EQ(graph.get_output_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kAdd);
+    ASSERT_EQ(graph.get_nodes()[0]->get_inputs().size(), 2u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_outputs().size(), 1u);
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
+                             "tensor<1x2xf32>) -> tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=Add"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %arg0 : tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
 }

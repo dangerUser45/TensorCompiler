@@ -3,6 +3,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -95,7 +96,7 @@ bool BuildMlirTensorType(const tc::frontend::TensorInfo& tensor,
 
 bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
 {
-    if (graph.get_input_tensors().size() != 1 ||
+    if (graph.get_input_tensors().empty() ||
         graph.get_output_tensors().size() != 1 || graph.get_nodes().empty()) {
         return false;
     }
@@ -106,10 +107,25 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
         }
         const auto kind = node_ptr->get_op_kind();
         if (kind != tc::frontend::OpKind::kRelu &&
-            kind != tc::frontend::OpKind::kTranspose) {
+            kind != tc::frontend::OpKind::kTranspose &&
+            kind != tc::frontend::OpKind::kAdd &&
+            kind != tc::frontend::OpKind::kMatMul) {
             return false;
         }
-        if (node_ptr->get_inputs().size() != 1 ||
+        std::size_t expected_inputs = 0;
+        switch (kind) {
+            case tc::frontend::OpKind::kRelu:
+            case tc::frontend::OpKind::kTranspose:
+                expected_inputs = 1;
+                break;
+            case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMatMul:
+                expected_inputs = 2;
+                break;
+            case tc::frontend::OpKind::kUnknown:
+                return false;
+        }
+        if (node_ptr->get_inputs().size() != expected_inputs ||
             node_ptr->get_outputs().size() != 1) {
             return false;
         }
@@ -124,14 +140,23 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     out_mlir_text.clear();
     out_error.clear();
 
-    const auto& input = *graph.get_input_tensors().front();
     const auto& output = *graph.get_output_tensors().front();
 
-    std::string input_ty;
-    std::string output_ty;
-    if (!BuildMlirTensorType(input, input_ty, out_error, "input")) {
-        return false;
+    std::vector<std::string> input_types;
+    input_types.reserve(graph.get_input_tensors().size());
+    for (const auto& input_ptr : graph.get_input_tensors()) {
+        if (!input_ptr) {
+            out_error = "ERROR: null input tensor in graph";
+            return false;
+        }
+        std::string input_ty;
+        if (!BuildMlirTensorType(*input_ptr, input_ty, out_error, "input")) {
+            return false;
+        }
+        input_types.push_back(std::move(input_ty));
     }
+
+    std::string output_ty;
     if (!BuildMlirTensorType(output, output_ty, out_error, "output")) {
         return false;
     }
@@ -140,8 +165,14 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     out << "module {\n";
     out << "  // tc.graph: " << GraphNameOrFallback(graph) << '\n';
     out << "  // tc.node_count: " << graph.get_nodes().size() << '\n';
-    out << "  func.func @main(%arg0: " << input_ty << ") -> " << output_ty
-        << " {\n";
+    out << "  func.func @main(";
+    for (std::size_t i = 0; i < input_types.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << "%arg" << i << ": " << input_types[i];
+    }
+    out << ") -> " << output_ty << " {\n";
 
     for (std::size_t i = 0; i < graph.get_nodes().size(); ++i) {
         const auto& node = *graph.get_nodes()[i];
@@ -151,7 +182,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     }
 
     std::string current_value = "%arg0";
-    std::string current_type = input_ty;
+    std::string current_type = input_types.front();
     if (current_type != output_ty) {
         out << "    %0 = builtin.unrealized_conversion_cast " << current_value
             << " : " << current_type << " to " << output_ty << '\n';
