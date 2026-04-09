@@ -10,8 +10,8 @@ on:
       - main
 
 jobs:
-  build-and-test:
-    name: Build & Test (${{ matrix.build_type }})
+  frontend-build-and-test:
+    name: Frontend Build & Test (${{ matrix.build_type }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -44,6 +44,41 @@ jobs:
 
       - name: Test
         run: ctest --test-dir frontend/build-${{ matrix.build_type }} --output-on-failure
+
+  backend-build-and-test:
+    name: Backend Build & Test (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    if: hashFiles('backend/CMakeLists.txt') != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            llvm \
+            llvm-dev
+
+      - name: Configure
+        run: |
+          cmake -S backend -B backend/build-${{ matrix.build_type }} \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DLLVM_DIR="$(llvm-config --cmakedir)"
+
+      - name: Build
+        run: cmake --build backend/build-${{ matrix.build_type }} --parallel
+
+      - name: Test
+        run: ctest --test-dir backend/build-${{ matrix.build_type }} --output-on-failure
 
   clang-format-check:
     name: Clang-Format (PR to dev/main)
