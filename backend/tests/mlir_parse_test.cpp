@@ -1,8 +1,8 @@
 #include <iostream>
 #include <string>
 
-#include "tc/backend/mlir_context.hpp"
-#include "tc/backend/mlir_pipeline.hpp"
+#include "mlir_context.hpp"
+#include "mlir_pipeline.hpp"
 
 namespace {
 

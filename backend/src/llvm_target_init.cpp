@@ -1,4 +1,4 @@
-#include "tc/backend/llvm_target_init.hpp"
+#include "llvm_target_init.hpp"
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Support/TargetSelect.h>
