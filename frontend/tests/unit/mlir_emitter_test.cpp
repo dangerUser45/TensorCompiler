@@ -68,6 +68,34 @@ tc::frontend::Graph MakeSingleAddGraph()
     return graph;
 }
 
+tc::frontend::Graph MakeSingleMatMulGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("matmul_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(MakeTensor("a", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    inputs.push_back(MakeTensor("b", { 2, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(MakeTensor("c", { 1, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("matmul_0");
+    node->set_name_op("MatMul");
+    node->set_op_kind(tc::frontend::OpKind::kMatMul);
+    node->set_inputs({ "a", "b" });
+    node->set_outputs({ "c" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
 } // namespace
 
 TEST(MlirEmitter, EmitsDeterministicSkeletonForSingleNodeGraph)
@@ -202,5 +230,39 @@ TEST(MlirEmitter, AddGraphEmitsTypedMainWithTwoArguments)
     EXPECT_NE(mlir_text.find("op=Add"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %arg0 : tensor<1x2xf32>"),
               std::string::npos)
+        << mlir_text;
+}
+
+TEST(MlirEmitter, MatMulGraphEmitsTypedMainWithTwoArguments)
+{
+    const auto graph = MakeSingleMatMulGraph();
+    ASSERT_EQ(graph.get_input_tensors().size(), 2u);
+    ASSERT_EQ(graph.get_output_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kMatMul);
+    ASSERT_EQ(graph.get_nodes()[0]->get_inputs().size(), 2u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_outputs().size(), 1u);
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
+                             "tensor<2x4xf32>) -> tensor<1x4xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=MatMul"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("builtin.unrealized_conversion_cast"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("return %0 : tensor<1x4xf32>"), std::string::npos)
         << mlir_text;
 }
