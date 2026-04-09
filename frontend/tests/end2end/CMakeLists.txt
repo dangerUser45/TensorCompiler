@@ -73,3 +73,18 @@ set_tests_properties(emit_mlir PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_test(
+  NAME emit_mlir_two_transposes
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/two_transposes.onnx
+          --expect op=Transpose
+          --expect builtin.unrealized_conversion_cast
+          --expect tensor<3x2x4xf32>
+)
+
+set_tests_properties(emit_mlir_two_transposes PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

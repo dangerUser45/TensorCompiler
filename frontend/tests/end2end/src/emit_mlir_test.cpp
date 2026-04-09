@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include <sys/wait.h>
 #include <unistd.h>
@@ -16,6 +17,7 @@ struct Config final
 {
     std::string driver_path;
     std::string model_path;
+    std::vector<std::string> expected_substrings;
 };
 
 Config g_config;
@@ -73,6 +75,14 @@ bool ParseCustomArgs(int* argc, char** argv)
             g_config.model_path = argv[++read_idx];
             continue;
         }
+        if (arg == "--expect") {
+            if (read_idx + 1 >= *argc) {
+                std::cerr << "ERROR: --expect value is required\n";
+                return false;
+            }
+            g_config.expected_substrings.push_back(argv[++read_idx]);
+            continue;
+        }
         argv[write_idx++] = argv[read_idx];
     }
     *argc = write_idx;
@@ -116,12 +126,17 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
         << log;
 
     const std::string mlir_text = ReadFileToString(mlir_output);
-    EXPECT_NE(mlir_text.find("module {"), std::string::npos)
-        << "unexpected mlir output:\n"
-        << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main("), std::string::npos)
-        << "unexpected mlir output:\n"
-        << mlir_text;
+    const std::vector<std::string> default_expectations = {
+        "module {", "func.func @main("
+    };
+    const std::vector<std::string>& expectations =
+        g_config.expected_substrings.empty() ? default_expectations
+                                             : g_config.expected_substrings;
+    for (const auto& needle : expectations) {
+        EXPECT_NE(mlir_text.find(needle), std::string::npos)
+            << "missing expected substring: " << needle << "\nmlir output:\n"
+            << mlir_text;
+    }
 
     std::error_code ec;
     std::filesystem::remove(mlir_output, ec);
