@@ -48,7 +48,7 @@ jobs:
   backend-build-and-test:
     name: Backend Build & Test (${{ matrix.build_type }})
     runs-on: ubuntu-latest
-    if: hashFiles('backend/CMakeLists.txt') != ''
+    if: ${{ hashFiles('backend/CMakeLists.txt') != '' }}
     strategy:
       fail-fast: false
       matrix:
