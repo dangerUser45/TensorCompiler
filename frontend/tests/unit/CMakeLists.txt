@@ -141,6 +141,10 @@ target_link_libraries(mlir_emitter_test PRIVATE
   project_warnings
 )
 
+target_compile_definitions(mlir_emitter_test PRIVATE
+  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+)
+
 add_test(
   NAME mlir_emitter_test
   COMMAND mlir_emitter_test

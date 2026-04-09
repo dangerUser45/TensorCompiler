@@ -6,6 +6,7 @@
 
 #include "graph.hpp"
 #include "mlir_emitter.hpp"
+#include "onnx_importer.hpp"
 #include "op_kind.hpp"
 
 namespace {
@@ -75,4 +76,32 @@ TEST(MlirEmitter, UsesFallbackGraphNameForUnnamedGraph)
         "  }\n"
         "}\n";
     EXPECT_EQ(mlir_text, expected);
+}
+
+TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>) -> "
+                             "tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }

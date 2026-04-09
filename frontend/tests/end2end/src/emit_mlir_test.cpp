@@ -119,7 +119,7 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
     EXPECT_NE(mlir_text.find("module {"), std::string::npos)
         << "unexpected mlir output:\n"
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main()"), std::string::npos)
+    EXPECT_NE(mlir_text.find("func.func @main("), std::string::npos)
         << "unexpected mlir output:\n"
         << mlir_text;
 
