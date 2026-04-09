@@ -88,3 +88,16 @@ set_tests_properties(emit_mlir_two_transposes PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_test(
+  NAME emit_mlir_add
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/add.onnx
+          --expect op=Add
+)
+
+set_tests_properties(emit_mlir_add PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
