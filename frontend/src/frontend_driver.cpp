@@ -8,6 +8,7 @@
 #include "dump_graph.hpp"
 #include "graph_hash.hpp"
 #include "graph_verifier.hpp"
+#include "mlir_emitter.hpp"
 #include "onnx.pb.h"
 #include "onnx_importer.hpp"
 
@@ -19,6 +20,10 @@
 #define TC_DEFAULT_HASH_DIR "build/hash"
 #endif
 
+#ifndef TC_DEFAULT_MLIR_DIR
+#define TC_DEFAULT_MLIR_DIR "build/mlir"
+#endif
+
 namespace {
 
 struct Options final
@@ -26,16 +31,18 @@ struct Options final
     std::string input_path;
     std::string dump_path;
     std::string hash_path;
+    std::string mlir_path;
     bool verify = false;
     bool dump_requested = false;
     bool hash_requested = false;
+    bool emit_mlir_requested = false;
 };
 
 inline std::string BuildUsage(const char* argv0)
 {
     return std::string("Usage: ") + argv0 +
            " <model.onnx> [--verify] [--dump[=<output.dot>]] "
-           "[--hash[=<output.hash>]]";
+           "[--hash[=<output.hash>]] [--emit-mlir[=<output.mlir>]]";
 }
 
 std::string BuildPathByModelName(const std::string& input_path,
@@ -62,6 +69,7 @@ bool ParseArgs(int argc,
         { "verify", no_argument, nullptr, 'v' },
         { "dump", optional_argument, nullptr, 'd' },
         { "hash", optional_argument, nullptr, 'h' },
+        { "emit-mlir", optional_argument, nullptr, 'm' },
         { nullptr, 0, nullptr, 0 }
     };
 
@@ -69,8 +77,8 @@ bool ParseArgs(int argc,
     optind = 1;
 
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, "vd::h::", kLongOptions, nullptr)) !=
-           -1) {
+    while ((opt = getopt_long(
+                argc, argv, "vd::h::m::", kLongOptions, nullptr)) != -1) {
         switch (opt) {
             case 'v':
                 out_options.verify = true;
@@ -95,6 +103,16 @@ bool ParseArgs(int argc,
                     }
                 }
                 break;
+            case 'm':
+                out_options.emit_mlir_requested = true;
+                if (optarg != nullptr) {
+                    out_options.mlir_path = optarg;
+                    if (out_options.mlir_path.empty()) {
+                        out_error = "ERROR: --emit-mlir path is empty";
+                        return false;
+                    }
+                }
+                break;
             case '?':
                 out_error = "ERROR: unknown option or missing value";
                 return false;
@@ -109,17 +127,34 @@ bool ParseArgs(int argc,
     out_options.input_path = argv[optind];
     ++optind;
 
-    if (optind < argc) {
-        if (out_options.dump_requested && out_options.dump_path.empty() &&
-            (argc - optind) == 1) {
-            out_options.dump_path = argv[optind];
-        } else if (out_options.hash_requested &&
-                   out_options.hash_path.empty() && (argc - optind) == 1) {
-            out_options.hash_path = argv[optind];
-        } else {
-            out_error = "ERROR: multiple input files are not supported";
+    if (optind < argc && (argc - optind) == 1) {
+        std::string* unresolved_output_path = nullptr;
+        std::size_t unresolved_count = 0;
+
+        auto mark_if_unresolved = [&](bool requested, std::string& path) {
+            if (requested && path.empty()) {
+                unresolved_output_path = &path;
+                ++unresolved_count;
+            }
+        };
+        mark_if_unresolved(out_options.dump_requested, out_options.dump_path);
+        mark_if_unresolved(out_options.hash_requested, out_options.hash_path);
+        mark_if_unresolved(out_options.emit_mlir_requested,
+                           out_options.mlir_path);
+
+        if (unresolved_count == 1) {
+            *unresolved_output_path = argv[optind];
+            ++optind;
+        } else if (unresolved_count > 1) {
+            out_error = "ERROR: ambiguous output path; use explicit "
+                        "--dump=, --hash= or --emit-mlir=";
             return false;
         }
+    }
+
+    if (optind < argc) {
+        out_error = "ERROR: multiple input files are not supported";
+        return false;
     }
 
     if (out_options.dump_requested && out_options.dump_path.empty()) {
@@ -130,6 +165,11 @@ bool ParseArgs(int argc,
     if (out_options.hash_requested && out_options.hash_path.empty()) {
         out_options.hash_path = BuildPathByModelName(
             out_options.input_path, TC_DEFAULT_HASH_DIR, ".hash");
+    }
+
+    if (out_options.emit_mlir_requested && out_options.mlir_path.empty()) {
+        out_options.mlir_path = BuildPathByModelName(
+            out_options.input_path, TC_DEFAULT_MLIR_DIR, ".mlir");
     }
 
     return true;
@@ -224,6 +264,37 @@ int main(int argc, char** argv)
             << std::setw(static_cast<int>(sizeof(std::size_t) * 2))
             << graph_hash << '\n';
         std::cout << "Graph hash written to: " << options.hash_path << '\n';
+    }
+
+    if (options.emit_mlir_requested) {
+        if (!EnsureParentDirExists(options.mlir_path)) {
+            std::cerr << "ERROR: failed to create mlir directory for "
+                      << options.mlir_path << '\n';
+            return 1;
+        }
+
+        std::string mlir_text;
+        if (!tc::frontend::mlir::EmitMlirModuleSkeleton(
+                graph_ir, mlir_text, error)) {
+            std::cerr << (error.empty() ? "ERROR: failed to emit MLIR" : error)
+                      << '\n';
+            return 1;
+        }
+
+        std::ofstream out(options.mlir_path, std::ios::out | std::ios::trunc);
+        if (!out.is_open()) {
+            std::cerr << "ERROR: failed to open mlir file: "
+                      << options.mlir_path << '\n';
+            return 1;
+        }
+
+        out << mlir_text;
+        if (!out.good()) {
+            std::cerr << "ERROR: failed to write mlir file: "
+                      << options.mlir_path << '\n';
+            return 1;
+        }
+        std::cout << "MLIR written to: " << options.mlir_path << '\n';
     }
 
     if (options.verify && !verified) {

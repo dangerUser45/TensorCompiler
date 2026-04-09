@@ -52,3 +52,24 @@ set_tests_properties(unsupported_op PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(emit_mlir_test
+  src/emit_mlir_test.cpp
+)
+
+target_link_libraries(emit_mlir_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME emit_mlir
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/single_relu.onnx
+)
+
+set_tests_properties(emit_mlir PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
