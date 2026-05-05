@@ -115,3 +115,24 @@ set_tests_properties(emit_mlir_matmul PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(verify_shape_invalid_test
+  src/verify_shape_invalid_test.cpp
+)
+
+target_link_libraries(verify_shape_invalid_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_shape_invalid
+  COMMAND verify_shape_invalid_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/matmul_3d.onnx
+)
+
+set_tests_properties(verify_shape_invalid PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

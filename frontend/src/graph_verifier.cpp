@@ -375,6 +375,40 @@ private:
         return true;
     }
 
+    bool ResolveBinaryInputShapes(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        const std::unordered_map<std::string, std::vector<int64_t>>&
+            tensor_shapes,
+        std::vector<int64_t>& lhs_shape,
+        std::vector<int64_t>& rhs_shape)
+    {
+        return ResolveInputShape(
+                   node, node_context, 0, tensor_shapes, lhs_shape) &&
+               ResolveInputShape(
+                   node, node_context, 1, tensor_shapes, rhs_shape);
+    }
+
+    void ValidateDeclaredOutputShapes(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        const char* op_name,
+        const std::vector<int64_t>& inferred_shape,
+        const std::unordered_map<std::string, std::vector<int64_t>>&
+            tensor_shapes)
+    {
+        for (const std::string& output_name : node.get_outputs()) {
+            const std::vector<int64_t>* output_shape =
+                FindTensorShape(tensor_shapes, output_name);
+            if (output_shape &&
+                !ShapesMatchForMvp(*output_shape, inferred_shape)) {
+                report_.add_error("ERROR: " + node_context + " op '" +
+                                  std::string(op_name) +
+                                  "' output shape mismatch");
+            }
+        }
+    }
+
     void PropagateNodeOutputShape(
         const tc::frontend::Node& node,
         const std::string& node_context,
@@ -409,164 +443,140 @@ private:
         std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
     {
         switch (node.get_op_kind()) {
-            case tc::frontend::OpKind::kRelu:
-            case tc::frontend::OpKind::kTranspose:
-                break;
-            case tc::frontend::OpKind::kAdd:
-            case tc::frontend::OpKind::kMatMul:
-                break;
-            case tc::frontend::OpKind::kUnknown:
-                return;
-        }
-
-        if (node.get_op_kind() == tc::frontend::OpKind::kRelu) {
-            if (node.get_inputs().size() < 1) {
-                return;
-            }
-            std::vector<int64_t> input_shape;
-            if (!ResolveInputShape(
-                    node, node_context, 0, tensor_shapes, input_shape)) {
-                return;
-            }
-
-            for (const std::string& output_name : node.get_outputs()) {
-                const std::vector<int64_t>* output_shape =
-                    FindTensorShape(tensor_shapes, output_name);
-                if (output_shape &&
-                    !ShapesMatchForMvp(*output_shape, input_shape)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Relu' output shape mismatch");
-                }
-            }
-            PropagateNodeOutputShape(
-                node, node_context, input_shape, tensor_shapes);
-            return;
-        }
-
-        if (node.get_op_kind() == tc::frontend::OpKind::kAdd) {
-            if (node.get_inputs().size() < 2) {
-                return;
-            }
-            std::vector<int64_t> lhs_shape;
-            std::vector<int64_t> rhs_shape;
-            if (!ResolveInputShape(
-                    node, node_context, 0, tensor_shapes, lhs_shape) ||
-                !ResolveInputShape(
-                    node, node_context, 1, tensor_shapes, rhs_shape)) {
-                return;
-            }
-
-            if (!ShapesMatchForMvp(lhs_shape, rhs_shape)) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'Add' input shapes mismatch");
-                return;
-            }
-
-            for (const std::string& output_name : node.get_outputs()) {
-                const std::vector<int64_t>* output_shape =
-                    FindTensorShape(tensor_shapes, output_name);
-                if (output_shape &&
-                    !ShapesMatchForMvp(*output_shape, lhs_shape)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Add' output shape mismatch");
-                }
-            }
-            PropagateNodeOutputShape(
-                node, node_context, lhs_shape, tensor_shapes);
-            return;
-        }
-
-        if (node.get_op_kind() == tc::frontend::OpKind::kMatMul) {
-            if (node.get_inputs().size() < 2) {
-                return;
-            }
-            std::vector<int64_t> lhs_shape;
-            std::vector<int64_t> rhs_shape;
-            if (!ResolveInputShape(
-                    node, node_context, 0, tensor_shapes, lhs_shape) ||
-                !ResolveInputShape(
-                    node, node_context, 1, tensor_shapes, rhs_shape)) {
-                return;
-            }
-
-            if (lhs_shape.size() != 2 || rhs_shape.size() != 2) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'MatMul' expects rank-2 inputs");
-                return;
-            }
-
-            if (lhs_shape[1] != -1 && rhs_shape[0] != -1 &&
-                lhs_shape[1] != rhs_shape[0]) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'MatMul' inner dimensions mismatch");
-                return;
-            }
-
-            std::vector<int64_t> inferred_shape{ lhs_shape[0], rhs_shape[1] };
-            for (const std::string& output_name : node.get_outputs()) {
-                const std::vector<int64_t>* output_shape =
-                    FindTensorShape(tensor_shapes, output_name);
-                if (output_shape &&
-                    !ShapesMatchForMvp(*output_shape, inferred_shape)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'MatMul' output shape mismatch");
-                }
-            }
-            PropagateNodeOutputShape(
-                node, node_context, inferred_shape, tensor_shapes);
-            return;
-        }
-
-        if (node.get_op_kind() == tc::frontend::OpKind::kTranspose) {
-            if (node.get_inputs().size() < 1) {
-                return;
-            }
-            std::vector<int64_t> input_shape;
-            if (!ResolveInputShape(
-                    node, node_context, 0, tensor_shapes, input_shape)) {
-                return;
-            }
-
-            const tc::frontend::Attribute* perm_attr = nullptr;
-            for (const auto& attr : node.get_attrs()) {
-                if (attr && attr->get_name() == "perm") {
-                    perm_attr = attr.get();
-                    break;
-                }
-            }
-            if (!perm_attr ||
-                perm_attr->get_data_type().id != tc::frontend::DataID::INT64) {
-                return;
-            }
-
-            const auto& perm = perm_attr->get_values<int64_t>();
-            if (perm.size() != input_shape.size()) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'Transpose' perm rank mismatch");
-                return;
-            }
-
-            std::vector<int64_t> inferred_shape;
-            inferred_shape.reserve(perm.size());
-            for (const int64_t axis : perm) {
-                if (axis < 0 ||
-                    static_cast<std::size_t>(axis) >= input_shape.size()) {
+            case tc::frontend::OpKind::kRelu: {
+                if (node.get_inputs().empty()) {
                     return;
                 }
-                inferred_shape.push_back(input_shape[axis]);
+                std::vector<int64_t> input_shape;
+                if (!ResolveInputShape(
+                        node, node_context, 0, tensor_shapes, input_shape)) {
+                    return;
+                }
+
+                ValidateDeclaredOutputShapes(
+                    node, node_context, "Relu", input_shape, tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, input_shape, tensor_shapes);
+                return;
             }
 
-            for (const std::string& output_name : node.get_outputs()) {
-                const std::vector<int64_t>* output_shape =
-                    FindTensorShape(tensor_shapes, output_name);
-                if (output_shape &&
-                    !ShapesMatchForMvp(*output_shape, inferred_shape)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Transpose' output shape mismatch");
+            case tc::frontend::OpKind::kAdd: {
+                if (node.get_inputs().size() < 2) {
+                    return;
                 }
+                std::vector<int64_t> lhs_shape;
+                std::vector<int64_t> rhs_shape;
+                if (!ResolveBinaryInputShapes(node,
+                                              node_context,
+                                              tensor_shapes,
+                                              lhs_shape,
+                                              rhs_shape)) {
+                    return;
+                }
+
+                if (!ShapesMatchForMvp(lhs_shape, rhs_shape)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Add' input shapes mismatch");
+                    return;
+                }
+
+                ValidateDeclaredOutputShapes(
+                    node, node_context, "Add", lhs_shape, tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, lhs_shape, tensor_shapes);
+                return;
             }
-            PropagateNodeOutputShape(
-                node, node_context, inferred_shape, tensor_shapes);
+
+            case tc::frontend::OpKind::kMatMul: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+                std::vector<int64_t> lhs_shape;
+                std::vector<int64_t> rhs_shape;
+                if (!ResolveBinaryInputShapes(node,
+                                              node_context,
+                                              tensor_shapes,
+                                              lhs_shape,
+                                              rhs_shape)) {
+                    return;
+                }
+
+                if (lhs_shape.size() != 2 || rhs_shape.size() != 2) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MatMul' expects rank-2 inputs");
+                    return;
+                }
+
+                if (lhs_shape[1] != -1 && rhs_shape[0] != -1 &&
+                    lhs_shape[1] != rhs_shape[0]) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MatMul' inner dimensions mismatch");
+                    return;
+                }
+
+                std::vector<int64_t> inferred_shape{ lhs_shape[0],
+                                                     rhs_shape[1] };
+                ValidateDeclaredOutputShapes(node,
+                                             node_context,
+                                             "MatMul",
+                                             inferred_shape,
+                                             tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
+            case tc::frontend::OpKind::kTranspose: {
+                if (node.get_inputs().empty()) {
+                    return;
+                }
+                std::vector<int64_t> input_shape;
+                if (!ResolveInputShape(
+                        node, node_context, 0, tensor_shapes, input_shape)) {
+                    return;
+                }
+
+                const tc::frontend::Attribute* perm_attr = nullptr;
+                for (const auto& attr : node.get_attrs()) {
+                    if (attr && attr->get_name() == "perm") {
+                        perm_attr = attr.get();
+                        break;
+                    }
+                }
+                if (!perm_attr || perm_attr->get_data_type().id !=
+                                      tc::frontend::DataID::INT64) {
+                    return;
+                }
+
+                const auto& perm = perm_attr->get_values<int64_t>();
+                if (perm.size() != input_shape.size()) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Transpose' perm rank mismatch");
+                    return;
+                }
+
+                std::vector<int64_t> inferred_shape;
+                inferred_shape.reserve(perm.size());
+                for (const int64_t axis : perm) {
+                    if (axis < 0 ||
+                        static_cast<std::size_t>(axis) >= input_shape.size()) {
+                        return;
+                    }
+                    inferred_shape.push_back(input_shape[axis]);
+                }
+
+                ValidateDeclaredOutputShapes(node,
+                                             node_context,
+                                             "Transpose",
+                                             inferred_shape,
+                                             tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
+            case tc::frontend::OpKind::kUnknown:
+                return;
         }
     }
 
