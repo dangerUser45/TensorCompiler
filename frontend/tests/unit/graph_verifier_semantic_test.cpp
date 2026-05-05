@@ -298,6 +298,25 @@ TEST(GraphVerifierSemantic, AddWithIncompatibleInputShapesFails)
         << "missing add input shape mismatch diagnostic";
 }
 
+TEST(GraphVerifierSemantic, AddWithBroadcastBiasShapePasses)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kAdd,
+                                     "Add",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 4 } },
+                                         { "b", { 4 } },
+                                         { "y", { 2, 4 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
 TEST(GraphVerifierSemantic, MatMulWithIncompatibleInnerDimensionsFails)
 {
     auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMatMul,

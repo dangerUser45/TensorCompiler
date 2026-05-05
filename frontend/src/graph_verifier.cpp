@@ -1,5 +1,6 @@
 #include "graph_verifier.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -64,6 +65,64 @@ bool ShapesMatchForMvp(const std::vector<int64_t>& lhs,
             return false;
         }
     }
+    return true;
+}
+
+bool BroadcastDimsCompatible(int64_t lhs_dim, int64_t rhs_dim) noexcept
+{
+    if (lhs_dim == rhs_dim || lhs_dim == 1 || rhs_dim == 1) {
+        return true;
+    }
+    if (lhs_dim == -1 || rhs_dim == -1) {
+        return true;
+    }
+    return false;
+}
+
+int64_t ResolveBroadcastDim(int64_t lhs_dim, int64_t rhs_dim) noexcept
+{
+    if (lhs_dim == rhs_dim) {
+        return lhs_dim;
+    }
+    if (lhs_dim == 1) {
+        return rhs_dim == -1 ? -1 : rhs_dim;
+    }
+    if (rhs_dim == 1) {
+        return lhs_dim == -1 ? -1 : lhs_dim;
+    }
+    if (lhs_dim == -1 && rhs_dim == -1) {
+        return -1;
+    }
+    if (lhs_dim == -1) {
+        return rhs_dim;
+    }
+    if (rhs_dim == -1) {
+        return lhs_dim;
+    }
+    return -1;
+}
+
+bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
+                           const std::vector<int64_t>& rhs_shape,
+                           std::vector<int64_t>& out_shape)
+{
+    const std::size_t rank = std::max(lhs_shape.size(), rhs_shape.size());
+    out_shape.assign(rank, -1);
+
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        const std::size_t lhs_offset = rank - lhs_shape.size();
+        const std::size_t rhs_offset = rank - rhs_shape.size();
+        const int64_t lhs_dim =
+            axis < lhs_offset ? 1 : lhs_shape[axis - lhs_offset];
+        const int64_t rhs_dim =
+            axis < rhs_offset ? 1 : rhs_shape[axis - rhs_offset];
+
+        if (!BroadcastDimsCompatible(lhs_dim, rhs_dim)) {
+            return false;
+        }
+        out_shape[axis] = ResolveBroadcastDim(lhs_dim, rhs_dim);
+    }
+
     return true;
 }
 
@@ -474,16 +533,18 @@ private:
                     return;
                 }
 
-                if (!ShapesMatchForMvp(lhs_shape, rhs_shape)) {
+                std::vector<int64_t> inferred_shape;
+                if (!ComputeBroadcastShape(
+                        lhs_shape, rhs_shape, inferred_shape)) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Add' input shapes mismatch");
                     return;
                 }
 
                 ValidateDeclaredOutputShapes(
-                    node, node_context, "Add", lhs_shape, tensor_shapes);
+                    node, node_context, "Add", inferred_shape, tensor_shapes);
                 PropagateNodeOutputShape(
-                    node, node_context, lhs_shape, tensor_shapes);
+                    node, node_context, inferred_shape, tensor_shapes);
                 return;
             }
 

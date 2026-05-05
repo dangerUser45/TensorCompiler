@@ -176,3 +176,24 @@ set_tests_properties(backend_stage_diagnostic PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(verify_emit_matrix_test
+  src/verify_emit_matrix_test.cpp
+)
+
+target_link_libraries(verify_emit_matrix_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_emit_matrix
+  COMMAND verify_emit_matrix_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --models-dir ${CMAKE_SOURCE_DIR}/models
+)
+
+set_tests_properties(verify_emit_matrix PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
