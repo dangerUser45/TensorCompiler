@@ -1,10 +1,7 @@
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -55,11 +52,7 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
         << "model not found: " << g_config.driver_model_args.model_path;
 
     const std::filesystem::path mlir_output =
-        std::filesystem::temp_directory_path() /
-        ("tc_emit_mlir_" + std::to_string(getpid()) + ".mlir");
-    const std::filesystem::path log_output =
-        std::filesystem::temp_directory_path() /
-        ("tc_emit_mlir_" + std::to_string(getpid()) + ".log");
+        tc::frontend::testutil::MakeTempPath("tc_emit_mlir", ".mlir");
 
     const std::string command =
         tc::frontend::testutil::ShellQuote(
@@ -68,18 +61,15 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
         tc::frontend::testutil::ShellQuote(
             g_config.driver_model_args.model_path) +
         " --emit-mlir=" +
-        tc::frontend::testutil::ShellQuote(mlir_output.string()) + " >" +
-        tc::frontend::testutil::ShellQuote(log_output.string()) + " 2>&1";
+        tc::frontend::testutil::ShellQuote(mlir_output.string());
 
-    const int system_status = std::system(command.c_str());
-    const int exit_code = tc::frontend::testutil::DecodeExitCode(system_status);
-    const std::string log =
-        tc::frontend::testutil::ReadFileToString(log_output);
+    const auto result = tc::frontend::testutil::RunCommandWithCapturedOutput(
+        command, "tc_emit_mlir");
 
-    EXPECT_EQ(exit_code, 0) << "driver output:\n" << log;
+    EXPECT_EQ(result.exit_code, 0) << "driver output:\n" << result.output;
     ASSERT_TRUE(std::filesystem::exists(mlir_output))
         << "mlir output is missing, driver output:\n"
-        << log;
+        << result.output;
 
     const std::string mlir_text =
         tc::frontend::testutil::ReadFileToString(mlir_output);
@@ -97,7 +87,6 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
 
     std::error_code ec;
     std::filesystem::remove(mlir_output, ec);
-    std::filesystem::remove(log_output, ec);
 }
 
 int main(int argc, char** argv)

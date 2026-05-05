@@ -1,9 +1,6 @@
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
-
-#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -33,36 +30,26 @@ TEST(VerifyShapeInvalid, FailsWithSemanticExitCodeAndDiagnostic)
     ASSERT_TRUE(std::filesystem::exists(g_config.driver_model_args.model_path))
         << "model not found: " << g_config.driver_model_args.model_path;
 
-    std::filesystem::path tmp_output =
-        std::filesystem::temp_directory_path() /
-        ("tc_verify_shape_invalid_" + std::to_string(getpid()) + ".log");
+    const std::string command = tc::frontend::testutil::ShellQuote(
+                                    g_config.driver_model_args.driver_path) +
+                                " " +
+                                tc::frontend::testutil::ShellQuote(
+                                    g_config.driver_model_args.model_path) +
+                                " --verify";
+    const auto result = tc::frontend::testutil::RunCommandWithCapturedOutput(
+        command, "tc_verify_shape_invalid");
 
-    const std::string command =
-        tc::frontend::testutil::ShellQuote(
-            g_config.driver_model_args.driver_path) +
-        " " +
-        tc::frontend::testutil::ShellQuote(
-            g_config.driver_model_args.model_path) +
-        " --verify >" +
-        tc::frontend::testutil::ShellQuote(tmp_output.string()) + " 2>&1";
-
-    const int system_status = std::system(command.c_str());
-    const int exit_code = tc::frontend::testutil::DecodeExitCode(system_status);
-    const std::string output =
-        tc::frontend::testutil::ReadFileToString(tmp_output);
-    std::error_code ec;
-    std::filesystem::remove(tmp_output, ec);
-
-    EXPECT_EQ(exit_code, 2) << "expected semantic verification exit code 2";
-    EXPECT_NE(
-        tc::frontend::testutil::ToLower(output).find("expects rank-2 inputs"),
-        std::string::npos)
+    EXPECT_EQ(result.exit_code, 2)
+        << "expected semantic verification exit code 2";
+    EXPECT_NE(tc::frontend::testutil::ToLower(result.output)
+                  .find("expects rank-2 inputs"),
+              std::string::npos)
         << "unexpected diagnostic output:\n"
-        << output;
-    EXPECT_NE(tc::frontend::testutil::ToLower(output).find("semantic"),
+        << result.output;
+    EXPECT_NE(tc::frontend::testutil::ToLower(result.output).find("semantic"),
               std::string::npos)
         << "missing semantic-stage diagnostic marker:\n"
-        << output;
+        << result.output;
 }
 
 int main(int argc, char** argv)
