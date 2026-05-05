@@ -261,13 +261,15 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         }
 
         const std::string& output_name = node.get_outputs()[0];
-        MlirValue result{ NextTemp(), output_ty };
+        std::optional<MlirValue> result;
 
         switch (node.get_op_kind()) {
             case tc::frontend::OpKind::kRelu: {
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
-                result.type = ResolveTensorType(output_name, input.type);
-                out << "    " << result.name << " = arith.maximumf "
+                result =
+                    MlirValue{ NextTemp(),
+                               ResolveTensorType(output_name, input.type) };
+                out << "    " << result->name << " = arith.maximumf "
                     << input.name << ", " << input.name << " : " << input.type
                     << '\n';
                 break;
@@ -276,8 +278,9 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             case tc::frontend::OpKind::kAdd: {
                 const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
                 const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
-                result.type = ResolveTensorType(output_name, lhs.type);
-                out << "    " << result.name << " = arith.addf " << lhs.name
+                result = MlirValue{ NextTemp(),
+                                    ResolveTensorType(output_name, lhs.type) };
+                out << "    " << result->name << " = arith.addf " << lhs.name
                     << ", " << rhs.name << " : " << lhs.type << '\n';
                 break;
             }
@@ -285,26 +288,30 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             case tc::frontend::OpKind::kMatMul: {
                 const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
                 const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
-                result.type = ResolveTensorType(output_name, output_ty);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
                 const std::string init = NextTemp();
-                out << "    " << init << " = tensor.empty() : " << result.type
+                out << "    " << init << " = tensor.empty() : " << result_type
                     << '\n';
-                out << "    " << result.name << " = linalg.matmul ins("
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name << " = linalg.matmul ins("
                     << lhs.name << ", " << rhs.name << " : " << lhs.type << ", "
-                    << rhs.type << ") outs(" << init << " : " << result.type
-                    << ") -> " << result.type << '\n';
+                    << rhs.type << ") outs(" << init << " : " << result_type
+                    << ") -> " << result_type << '\n';
                 break;
             }
 
             case tc::frontend::OpKind::kTranspose: {
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
-                result.type = ResolveTensorType(output_name, output_ty);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
                 const std::string init = NextTemp();
-                out << "    " << init << " = tensor.empty() : " << result.type
+                out << "    " << init << " = tensor.empty() : " << result_type
                     << '\n';
-                out << "    " << result.name << " = linalg.transpose ins("
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name << " = linalg.transpose ins("
                     << input.name << " : " << input.type << ") outs(" << init
-                    << " : " << result.type << ") permutation = ["
+                    << " : " << result_type << ") permutation = ["
                     << BuildPermutation(node) << "]\n";
                 break;
             }
@@ -313,8 +320,10 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 continue;
         }
 
-        tensor_types[output_name] = result.type;
-        values_by_tensor[output_name] = std::move(result);
+        if (result.has_value()) {
+            tensor_types[output_name] = result->type;
+            values_by_tensor[output_name] = std::move(*result);
+        }
     }
 
     std::string return_value = "%arg0";

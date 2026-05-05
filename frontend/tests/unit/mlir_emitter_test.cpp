@@ -311,3 +311,21 @@ TEST(MlirEmitter, MatMulModelRequiresLinalgMatmulLowering)
         << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
+
+TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
+{
+    const auto graph = MakeSingleMatMulGraph();
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    const auto empty_pos = mlir_text.find("%t0 = tensor.empty()");
+    const auto matmul_pos = mlir_text.find("%t1 = linalg.matmul");
+
+    ASSERT_NE(empty_pos, std::string::npos) << mlir_text;
+    ASSERT_NE(matmul_pos, std::string::npos) << mlir_text;
+    EXPECT_LT(empty_pos, matmul_pos) << mlir_text;
+}
