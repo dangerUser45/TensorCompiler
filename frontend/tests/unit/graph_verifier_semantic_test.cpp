@@ -38,7 +38,9 @@ tc::frontend::Graph MakeSingleNodeGraph(
     std::vector<std::string> outputs,
     tc::frontend::Node::AttrVecT attrs = {},
     const std::unordered_map<std::string, tc::frontend::DataT>&
-        tensor_types = {})
+        tensor_types = {},
+    const std::unordered_map<std::string, std::vector<int64_t>>&
+        tensor_shapes = {})
 {
     tc::frontend::Graph graph;
     graph.set_name("semantic_graph");
@@ -60,7 +62,10 @@ tc::frontend::Graph MakeSingleNodeGraph(
     for (const auto& input_name : input_names) {
         auto tensor = std::make_unique<tc::frontend::TensorInfo>();
         tensor->set_name(input_name);
-        tensor->set_shape({ 1 });
+        const auto shape_it = tensor_shapes.find(input_name);
+        tensor->set_shape(shape_it == tensor_shapes.end()
+                              ? std::vector<int64_t>{ 1 }
+                              : shape_it->second);
         const auto it = tensor_types.find(input_name);
         tensor->set_data_type(it == tensor_types.end()
                                   ? tc::frontend::TypeInfo<float>::type
@@ -74,7 +79,10 @@ tc::frontend::Graph MakeSingleNodeGraph(
     for (const auto& output_name : outputs) {
         auto tensor = std::make_unique<tc::frontend::TensorInfo>();
         tensor->set_name(output_name);
-        tensor->set_shape({ 1 });
+        const auto shape_it = tensor_shapes.find(output_name);
+        tensor->set_shape(shape_it == tensor_shapes.end()
+                              ? std::vector<int64_t>{ 1 }
+                              : shape_it->second);
         const auto it = tensor_types.find(output_name);
         tensor->set_data_type(it == tensor_types.end()
                                   ? tc::frontend::TypeInfo<float>::type
@@ -249,6 +257,87 @@ TEST(GraphVerifierSemantic, TransposeWithOutputDtypeMismatchFails)
     EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
     EXPECT_TRUE(HasDiagnosticContaining(report, "output dtype mismatch"))
         << "missing transpose output dtype mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, ReluWithMismatchedInputOutputShapeFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 3 } },
+                                         { "y", { 2, 4 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "output shape mismatch"))
+        << "missing relu output shape mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, AddWithIncompatibleInputShapesFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kAdd,
+                                     "Add",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 3 } },
+                                         { "b", { 2, 4 } },
+                                         { "y", { 2, 3 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input shapes mismatch"))
+        << "missing add input shape mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, MatMulWithIncompatibleInnerDimensionsFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMatMul,
+                                     "MatMul",
+                                     { "x", "w" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 3 } },
+                                         { "w", { 4, 5 } },
+                                         { "y", { 2, 5 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "inner dimensions mismatch"))
+        << "missing matmul inner dimensions mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, TransposeWithPermRankMismatchFails)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("perm", { 0, 1 }));
+
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kTranspose,
+                                     "Transpose",
+                                     { "x" },
+                                     { "y" },
+                                     std::move(attrs),
+                                     {},
+                                     {
+                                         { "x", { 2, 3, 4 } },
+                                         { "y", { 2, 3 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "perm rank mismatch"))
+        << "missing transpose perm rank mismatch diagnostic";
 }
 
 } // namespace
