@@ -118,6 +118,22 @@ set_tests_properties(emit_mlir_matmul PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_test(
+  NAME emit_mlir_matmul_addmm
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/matmul_addmm.onnx
+          --expect op=MatMul
+          --expect linalg.matmul
+          --expect op=Add
+          --expect arith.addf
+)
+
+set_tests_properties(emit_mlir_matmul_addmm PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_executable(verify_shape_invalid_test
   src/verify_shape_invalid_test.cpp
 )
