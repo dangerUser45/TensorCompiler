@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include "dump_graph.hpp"
 #include "graph_hash.hpp"
@@ -177,12 +178,30 @@ bool ParseArgs(int argc,
 
 void PrintVerifyReport(const tc::frontend::verify::Report& report)
 {
-    std::cout << "Verifier errors: " << report.error_count() << '\n';
-    std::cout << "Verifier warnings: " << report.warning_count() << '\n';
+    std::cout << "[semantic] errors: " << report.error_count() << '\n';
+    std::cout << "[semantic] warnings: " << report.warning_count() << '\n';
     for (const auto& diagnostic : report.diagnostics()) {
-        std::cout << tc::frontend::verify::SeverityToString(diagnostic.severity)
-                  << ": " << diagnostic.message << '\n';
+        std::cout << "[semantic]["
+                  << tc::frontend::verify::SeverityToString(diagnostic.severity)
+                  << "] " << diagnostic.message << '\n';
     }
+}
+
+std::string StripErrorPrefix(std::string message)
+{
+    constexpr std::string_view kErrorPrefix = "ERROR: ";
+    if (message.rfind(kErrorPrefix.data(), 0) == 0) {
+        return message.substr(kErrorPrefix.size());
+    }
+    return message;
+}
+
+void PrintStageError(std::string_view stage, std::string message)
+{
+    const std::string normalized = StripErrorPrefix(std::move(message));
+    std::cerr << "ERROR[" << stage
+              << "]: " << (normalized.empty() ? "unknown failure" : normalized)
+              << '\n';
 }
 
 bool EnsureParentDirExists(const std::string& file_path)
@@ -204,7 +223,7 @@ int main(int argc, char** argv)
     Options options;
     std::string error;
     if (!ParseArgs(argc, argv, options, error)) {
-        std::cerr << error << '\n';
+        PrintStageError("cli", error);
         if (error.rfind("Usage:", 0) != 0) {
             std::cerr << BuildUsage(argv[0]) << '\n';
         }
@@ -215,7 +234,7 @@ int main(int argc, char** argv)
     tc::frontend::Graph graph_ir;
     if (!tc::frontend::onnx::ImportOnnxToGraph(
             options.input_path, model, graph_ir, error)) {
-        std::cerr << error << '\n';
+        PrintStageError("import", error);
         return 1;
     }
 
@@ -229,15 +248,17 @@ int main(int argc, char** argv)
 
     if (options.dump_requested) {
         if (!EnsureParentDirExists(options.dump_path)) {
-            std::cerr << "ERROR: failed to create dump directory for "
-                      << options.dump_path << '\n';
+            PrintStageError("frontend",
+                            "ERROR: failed to create dump directory for " +
+                                options.dump_path);
             return 1;
         }
 
         std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
-            std::cerr << "ERROR: failed to open dump file: "
-                      << options.dump_path << '\n';
+            PrintStageError("frontend",
+                            "ERROR: failed to open dump file: " +
+                                options.dump_path);
             return 1;
         }
         tc::frontend::DumpGraph dumper(out);
@@ -247,15 +268,17 @@ int main(int argc, char** argv)
 
     if (options.hash_requested) {
         if (!EnsureParentDirExists(options.hash_path)) {
-            std::cerr << "ERROR: failed to create hash directory for "
-                      << options.hash_path << '\n';
+            PrintStageError("frontend",
+                            "ERROR: failed to create hash directory for " +
+                                options.hash_path);
             return 1;
         }
 
         std::ofstream out(options.hash_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
-            std::cerr << "ERROR: failed to open hash file: "
-                      << options.hash_path << '\n';
+            PrintStageError("frontend",
+                            "ERROR: failed to open hash file: " +
+                                options.hash_path);
             return 1;
         }
 
@@ -268,30 +291,34 @@ int main(int argc, char** argv)
 
     if (options.emit_mlir_requested) {
         if (!EnsureParentDirExists(options.mlir_path)) {
-            std::cerr << "ERROR: failed to create mlir directory for "
-                      << options.mlir_path << '\n';
+            PrintStageError("backend",
+                            "ERROR: failed to create mlir directory for " +
+                                options.mlir_path);
             return 1;
         }
 
         std::string mlir_text;
         if (!tc::frontend::mlir::EmitMlirModuleSkeleton(
                 graph_ir, mlir_text, error)) {
-            std::cerr << (error.empty() ? "ERROR: failed to emit MLIR" : error)
-                      << '\n';
+            PrintStageError("backend",
+                            error.empty() ? "ERROR: failed to emit MLIR"
+                                          : error);
             return 1;
         }
 
         std::ofstream out(options.mlir_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
-            std::cerr << "ERROR: failed to open mlir file: "
-                      << options.mlir_path << '\n';
+            PrintStageError("backend",
+                            "ERROR: failed to open mlir file: " +
+                                options.mlir_path);
             return 1;
         }
 
         out << mlir_text;
         if (!out.good()) {
-            std::cerr << "ERROR: failed to write mlir file: "
-                      << options.mlir_path << '\n';
+            PrintStageError("backend",
+                            "ERROR: failed to write mlir file: " +
+                                options.mlir_path);
             return 1;
         }
         std::cout << "MLIR written to: " << options.mlir_path << '\n';

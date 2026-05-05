@@ -59,6 +59,10 @@ TEST(UnsupportedOperator, FailsWithClearDiagnostic)
         std::string::npos)
         << "unexpected diagnostic output:\n"
         << output;
+    EXPECT_NE(tc::frontend::testutil::ToLower(output).find("import"),
+              std::string::npos)
+        << "missing import-stage diagnostic marker:\n"
+        << output;
 }
 
 int main(int argc, char** argv)

@@ -154,3 +154,25 @@ set_tests_properties(verify_shape_invalid PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(backend_stage_diagnostic_test
+  src/backend_stage_diagnostic_test.cpp
+)
+
+target_link_libraries(backend_stage_diagnostic_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME backend_stage_diagnostic
+  COMMAND backend_stage_diagnostic_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/single_relu.onnx
+          --output /
+)
+
+set_tests_properties(backend_stage_diagnostic PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
