@@ -170,6 +170,7 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
                              "tensor<1x2xf32>"),
               std::string::npos)
         << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.maximumf"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
 
@@ -197,6 +198,8 @@ TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
     EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<2x3x4xf32>) -> "
                              "tensor<3x2x4xf32>"),
               std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.transpose"), std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("op=Transpose"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
@@ -227,10 +230,29 @@ TEST(MlirEmitter, AddGraphEmitsTypedMainWithTwoArguments)
                              "tensor<1x2xf32>) -> tensor<1x2xf32>"),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("op=Add"), std::string::npos) << mlir_text;
-    EXPECT_NE(mlir_text.find("return %arg0 : tensor<1x2xf32>"),
-              std::string::npos)
-        << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, AddModelRequiresArithmeticAddLowering)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/add.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
 
 TEST(MlirEmitter, MatMulGraphEmitsTypedMainWithTwoArguments)
@@ -259,10 +281,33 @@ TEST(MlirEmitter, MatMulGraphEmitsTypedMainWithTwoArguments)
                              "tensor<2x4xf32>) -> tensor<1x4xf32>"),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("op=MatMul"), std::string::npos) << mlir_text;
-    EXPECT_NE(mlir_text.find("builtin.unrealized_conversion_cast"),
+    EXPECT_NE(mlir_text.find("linalg.matmul"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("tensor.empty() : tensor<1x4xf32>"),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("return %0 : tensor<1x4xf32>"), std::string::npos)
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, MatMulModelRequiresLinalgMatmulLowering)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/matmul_2d.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("linalg.matmul"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("tensor.empty() : tensor<3x3xf32>"),
+              std::string::npos)
         << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }

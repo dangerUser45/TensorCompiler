@@ -67,6 +67,7 @@ add_test(
   COMMAND emit_mlir_test
           --driver $<TARGET_FILE:frontend_driver>
           --model ${CMAKE_SOURCE_DIR}/models/single_relu.onnx
+          --expect arith.maximumf
 )
 
 set_tests_properties(emit_mlir PROPERTIES
@@ -80,7 +81,7 @@ add_test(
           --driver $<TARGET_FILE:frontend_driver>
           --model ${CMAKE_SOURCE_DIR}/models/two_transposes.onnx
           --expect op=Transpose
-          --expect builtin.unrealized_conversion_cast
+          --expect linalg.transpose
           --expect tensor<3x2x4xf32>
 )
 
@@ -95,6 +96,7 @@ add_test(
           --driver $<TARGET_FILE:frontend_driver>
           --model ${CMAKE_SOURCE_DIR}/models/add.onnx
           --expect op=Add
+          --expect arith.addf
 )
 
 set_tests_properties(emit_mlir_add PROPERTIES
@@ -108,7 +110,7 @@ add_test(
           --driver $<TARGET_FILE:frontend_driver>
           --model ${CMAKE_SOURCE_DIR}/models/matmul_2d.onnx
           --expect op=MatMul
-          --expect builtin.unrealized_conversion_cast
+          --expect linalg.matmul
 )
 
 set_tests_properties(emit_mlir_matmul PROPERTIES

@@ -2,7 +2,9 @@
 
 #include <optional>
 #include <sstream>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -143,6 +145,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     const auto& output = *graph.get_output_tensors().front();
 
     std::vector<std::string> input_types;
+    std::unordered_map<std::string, std::string> tensor_types;
     input_types.reserve(graph.get_input_tensors().size());
     for (const auto& input_ptr : graph.get_input_tensors()) {
         if (!input_ptr) {
@@ -153,12 +156,24 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         if (!BuildMlirTensorType(*input_ptr, input_ty, out_error, "input")) {
             return false;
         }
+        tensor_types[input_ptr->get_name()] = input_ty;
         input_types.push_back(std::move(input_ty));
     }
 
     std::string output_ty;
     if (!BuildMlirTensorType(output, output_ty, out_error, "output")) {
         return false;
+    }
+    tensor_types[output.get_name()] = output_ty;
+    for (const auto& output_ptr : graph.get_output_tensors()) {
+        if (!output_ptr) {
+            continue;
+        }
+        std::string out_ty;
+        if (!BuildMlirTensorType(*output_ptr, out_ty, out_error, "output")) {
+            return false;
+        }
+        tensor_types[output_ptr->get_name()] = out_ty;
     }
 
     std::ostringstream out;
@@ -181,15 +196,144 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             << ", name=" << NodeNameOrFallback(node) << '\n';
     }
 
-    std::string current_value = "%arg0";
-    std::string current_type = input_types.front();
-    if (current_type != output_ty) {
-        out << "    %0 = builtin.unrealized_conversion_cast " << current_value
-            << " : " << current_type << " to " << output_ty << '\n';
-        current_value = "%0";
-        current_type = output_ty;
+    struct MlirValue final
+    {
+        std::string name;
+        std::string type;
+    };
+
+    std::unordered_map<std::string, MlirValue> values_by_tensor;
+    for (std::size_t i = 0; i < graph.get_input_tensors().size(); ++i) {
+        const auto& input_ptr = graph.get_input_tensors()[i];
+        if (!input_ptr) {
+            continue;
+        }
+        values_by_tensor[input_ptr->get_name()] = {
+            "%arg" + std::to_string(i),
+            input_types[i],
+        };
     }
-    out << "    return " << current_value << " : " << output_ty << '\n';
+
+    std::size_t temp_id = 0;
+    auto NextTemp = [&temp_id]() { return "%t" + std::to_string(temp_id++); };
+    auto ResolveInputValue = [&values_by_tensor,
+                              &input_types](const std::string& tensor_name) {
+        const auto it = values_by_tensor.find(tensor_name);
+        if (it != values_by_tensor.end()) {
+            return it->second;
+        }
+        return MlirValue{ "%arg0", input_types.front() };
+    };
+    auto ResolveTensorType = [&tensor_types](const std::string& tensor_name,
+                                             const std::string& fallback_type) {
+        const auto it = tensor_types.find(tensor_name);
+        if (it != tensor_types.end()) {
+            return it->second;
+        }
+        return fallback_type;
+    };
+    auto BuildPermutation = [](const tc::frontend::Node& node) {
+        std::string text;
+        for (const auto& attr : node.get_attrs()) {
+            if (!attr || attr->get_name() != "perm" ||
+                attr->get_data_type().id != tc::frontend::DataID::INT64) {
+                continue;
+            }
+            const auto& perm = attr->get_values<int64_t>();
+            for (std::size_t i = 0; i < perm.size(); ++i) {
+                if (i != 0) {
+                    text += ", ";
+                }
+                text += std::to_string(perm[i]);
+            }
+            return text;
+        }
+        return std::string("0");
+    };
+
+    for (const auto& node_ptr : graph.get_nodes()) {
+        if (!node_ptr) {
+            continue;
+        }
+        const auto& node = *node_ptr;
+        if (node.get_outputs().empty()) {
+            continue;
+        }
+
+        const std::string& output_name = node.get_outputs()[0];
+        MlirValue result{ NextTemp(), output_ty };
+
+        switch (node.get_op_kind()) {
+            case tc::frontend::OpKind::kRelu: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                result.type = ResolveTensorType(output_name, input.type);
+                out << "    " << result.name << " = arith.maximumf "
+                    << input.name << ", " << input.name << " : " << input.type
+                    << '\n';
+                break;
+            }
+
+            case tc::frontend::OpKind::kAdd: {
+                const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
+                const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
+                result.type = ResolveTensorType(output_name, lhs.type);
+                out << "    " << result.name << " = arith.addf " << lhs.name
+                    << ", " << rhs.name << " : " << lhs.type << '\n';
+                break;
+            }
+
+            case tc::frontend::OpKind::kMatMul: {
+                const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
+                const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
+                result.type = ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                out << "    " << init << " = tensor.empty() : " << result.type
+                    << '\n';
+                out << "    " << result.name << " = linalg.matmul ins("
+                    << lhs.name << ", " << rhs.name << " : " << lhs.type << ", "
+                    << rhs.type << ") outs(" << init << " : " << result.type
+                    << ") -> " << result.type << '\n';
+                break;
+            }
+
+            case tc::frontend::OpKind::kTranspose: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                result.type = ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                out << "    " << init << " = tensor.empty() : " << result.type
+                    << '\n';
+                out << "    " << result.name << " = linalg.transpose ins("
+                    << input.name << " : " << input.type << ") outs(" << init
+                    << " : " << result.type << ") permutation = ["
+                    << BuildPermutation(node) << "]\n";
+                break;
+            }
+
+            case tc::frontend::OpKind::kUnknown:
+                continue;
+        }
+
+        tensor_types[output_name] = result.type;
+        values_by_tensor[output_name] = std::move(result);
+    }
+
+    std::string return_value = "%arg0";
+    std::string return_type = input_types.front();
+    const auto output_it = values_by_tensor.find(output.get_name());
+    if (output_it != values_by_tensor.end()) {
+        return_value = output_it->second.name;
+        return_type = output_it->second.type;
+    }
+
+    if (return_type != output_ty) {
+        const std::string cast_tmp = NextTemp();
+        out << "    " << cast_tmp << " = builtin.unrealized_conversion_cast "
+            << return_value << " : " << return_type << " to " << output_ty
+            << '\n';
+        return_value = cast_tmp;
+        return_type = output_ty;
+    }
+    out << "    return " << return_value << " : " << output_ty << '\n';
     out << "  }\n";
     out << "}\n";
 
