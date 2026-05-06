@@ -1,4 +1,9 @@
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -67,6 +72,107 @@ tc::frontend::Graph MakeSingleAddGraph()
 
     return graph;
 }
+
+tc::frontend::Graph MakeSingleMulGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("mul_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(MakeTensor("x", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    inputs.push_back(MakeTensor("y", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(MakeTensor("z", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("mul_0");
+    node->set_name_op("Mul");
+    node->set_op_kind(tc::frontend::OpKind::kMul);
+    node->set_inputs({ "x", "y" });
+    node->set_outputs({ "z" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
+void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
+                         const std::string& name,
+                         const std::vector<int64_t>& shape_dims)
+{
+    value_info->set_name(name);
+    auto* tensor_type = value_info->mutable_type()->mutable_tensor_type();
+    tensor_type->set_elem_type(::onnx::TensorProto_DataType_FLOAT);
+    auto* shape = tensor_type->mutable_shape();
+    for (int64_t dim : shape_dims) {
+        shape->add_dim()->set_dim_value(dim);
+    }
+}
+
+::onnx::ModelProto BuildBinaryOnnxModel(const std::string& op_type)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("mlir_emitter_binary_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 2 });
+    FillTensorValueInfo(graph->add_input(), "rhs", { 1, 2 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 2 });
+
+    auto* node = graph->add_node();
+    node->set_name("mul_0");
+    node->set_op_type(op_type);
+    node->add_input("x");
+    node->add_input("rhs");
+    node->add_output("y");
+
+    return model;
+}
+
+class TempModelFile final
+{
+public:
+    explicit TempModelFile(const ::onnx::ModelProto& model)
+    {
+        static std::atomic_uint64_t seq{ 0 };
+        const auto now = std::chrono::high_resolution_clock::now()
+                             .time_since_epoch()
+                             .count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("tc_mlir_emitter_" + std::to_string(now) + "_" +
+                 std::to_string(seq.fetch_add(1, std::memory_order_relaxed)) +
+                 ".onnx");
+
+        std::ofstream output(path_, std::ios::binary);
+        if (!output.is_open() || !model.SerializeToOstream(&output)) {
+            throw std::runtime_error("failed to write temp ONNX model");
+        }
+    }
+
+    ~TempModelFile()
+    {
+        std::error_code ec;
+        std::filesystem::remove(path_, ec);
+    }
+
+    const std::filesystem::path& path() const noexcept
+    {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
 
 tc::frontend::Graph MakeSingleMatMulGraph()
 {
@@ -277,6 +383,62 @@ TEST(MlirEmitter, AddModelRequiresArithmeticAddLowering)
         << error;
 
     EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, MulGraphEmitsTypedMainWithMulf)
+{
+    const auto graph = MakeSingleMulGraph();
+    ASSERT_EQ(graph.get_input_tensors().size(), 2u);
+    ASSERT_EQ(graph.get_output_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kMul);
+    ASSERT_EQ(graph.get_nodes()[0]->get_inputs().size(), 2u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_outputs().size(), 1u);
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
+                             "tensor<1x2xf32>) -> tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=Mul"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.mulf"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, MulOnnxModelRequiresArithmeticMulLowering)
+{
+    const TempModelFile temp_model(BuildBinaryOnnxModel("Mul"));
+
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=Mul"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.mulf"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
 

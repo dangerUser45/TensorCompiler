@@ -111,6 +111,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
         if (kind != tc::frontend::OpKind::kRelu &&
             kind != tc::frontend::OpKind::kTranspose &&
             kind != tc::frontend::OpKind::kAdd &&
+            kind != tc::frontend::OpKind::kMul &&
             kind != tc::frontend::OpKind::kMatMul) {
             return false;
         }
@@ -121,6 +122,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
                 expected_inputs = 1;
                 break;
             case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
                 break;
@@ -405,6 +407,21 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
 
                 result = MlirValue{ NextTemp(), result_type };
                 out << "    " << result->name << " = arith.addf " << lhs.name
+                    << ", " << rhs.name << " : " << result_type << '\n';
+                break;
+            }
+
+            case tc::frontend::OpKind::kMul: {
+                MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
+                MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, lhs.type);
+
+                lhs = MaterializeToType(lhs, result_type);
+                rhs = MaterializeToType(rhs, result_type);
+
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name << " = arith.mulf " << lhs.name
                     << ", " << rhs.name << " : " << result_type << '\n';
                 break;
             }

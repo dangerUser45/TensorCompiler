@@ -195,6 +195,7 @@ private:
                 }
                 break;
             case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul:
                 if (input_count != 2) {
                     AddArityError(
@@ -332,6 +333,7 @@ private:
             }
 
             case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul: {
                 if (node.get_inputs().size() < 2) {
                     return;
@@ -543,6 +545,35 @@ private:
 
                 ValidateDeclaredOutputShapes(
                     node, node_context, "Add", inferred_shape, tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
+            case tc::frontend::OpKind::kMul: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+                std::vector<int64_t> lhs_shape;
+                std::vector<int64_t> rhs_shape;
+                if (!ResolveBinaryInputShapes(node,
+                                              node_context,
+                                              tensor_shapes,
+                                              lhs_shape,
+                                              rhs_shape)) {
+                    return;
+                }
+
+                std::vector<int64_t> inferred_shape;
+                if (!ComputeBroadcastShape(
+                        lhs_shape, rhs_shape, inferred_shape)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Mul' input shapes mismatch");
+                    return;
+                }
+
+                ValidateDeclaredOutputShapes(
+                    node, node_context, "Mul", inferred_shape, tensor_shapes);
                 PropagateNodeOutputShape(
                     node, node_context, inferred_shape, tensor_shapes);
                 return;
@@ -803,6 +834,7 @@ private:
             switch (op_kind) {
                 case tc::frontend::OpKind::kRelu:
                 case tc::frontend::OpKind::kAdd:
+                case tc::frontend::OpKind::kMul:
                 case tc::frontend::OpKind::kMatMul:
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +

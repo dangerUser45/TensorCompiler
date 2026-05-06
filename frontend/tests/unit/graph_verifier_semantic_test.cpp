@@ -221,6 +221,49 @@ TEST(GraphVerifierSemantic, AddWithMismatchedInputDtypesFails)
         << "missing add dtype mismatch diagnostic";
 }
 
+TEST(GraphVerifierSemantic, ValidMulGraphPasses)
+{
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kMul, "Mul", { "x", "b" }, { "y" });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << "expected valid mul graph to pass semantic checks\n"
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MulWithOneInputFails)
+{
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kMul, "Mul", { "x" }, { "y" });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(HasDiagnosticContaining(report, "expects 2 input"))
+        << "missing mul arity diagnostic";
+}
+
+TEST(GraphVerifierSemantic, MulWithMismatchedInputDtypesFails)
+{
+    auto graph =
+        MakeSingleNodeGraph(tc::frontend::OpKind::kMul,
+                            "Mul",
+                            { "x", "b" },
+                            { "y" },
+                            {},
+                            {
+                                { "x", tc::frontend::TypeInfo<float>::type },
+                                { "b", tc::frontend::TypeInfo<int32_t>::type },
+                                { "y", tc::frontend::TypeInfo<float>::type },
+                            });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input dtypes mismatch"))
+        << "missing mul dtype mismatch diagnostic";
+}
+
 TEST(GraphVerifierSemantic, ReluWithUnsupportedStringInputDtypeFails)
 {
     auto graph = MakeSingleNodeGraph(
@@ -302,6 +345,45 @@ TEST(GraphVerifierSemantic, AddWithBroadcastBiasShapePasses)
 {
     auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kAdd,
                                      "Add",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 4 } },
+                                         { "b", { 4 } },
+                                         { "y", { 2, 4 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MulWithIncompatibleInputShapesFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMul,
+                                     "Mul",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 2, 3 } },
+                                         { "b", { 2, 4 } },
+                                         { "y", { 2, 3 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input shapes mismatch"))
+        << "missing mul input shape mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, MulWithBroadcastBiasShapePasses)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMul,
+                                     "Mul",
                                      { "x", "b" },
                                      { "y" },
                                      {},
