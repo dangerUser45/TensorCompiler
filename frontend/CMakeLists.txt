@@ -47,6 +47,7 @@ add_custom_command(
 add_library(tc_frontend_onnx STATIC
     src/onnx_importer.cpp
     src/graph_verifier.cpp
+    src/mlir_emitter.cpp
     ${PROTO_SRCS}
 )
 

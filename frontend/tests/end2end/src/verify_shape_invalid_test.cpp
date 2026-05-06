@@ -23,7 +23,7 @@ bool ParseCustomArgs(int* argc, char** argv)
 
 } // namespace
 
-TEST(UnsupportedOperator, FailsWithClearDiagnostic)
+TEST(VerifyShapeInvalid, FailsWithSemanticExitCodeAndDiagnostic)
 {
     ASSERT_TRUE(std::filesystem::exists(g_config.driver_model_args.driver_path))
         << "driver not found: " << g_config.driver_model_args.driver_path;
@@ -34,19 +34,21 @@ TEST(UnsupportedOperator, FailsWithClearDiagnostic)
                                     g_config.driver_model_args.driver_path) +
                                 " " +
                                 tc::frontend::testutil::ShellQuote(
-                                    g_config.driver_model_args.model_path);
+                                    g_config.driver_model_args.model_path) +
+                                " --verify";
     const auto result = tc::frontend::testutil::RunCommandWithCapturedOutput(
-        command, "tc_unsupported_op");
+        command, "tc_verify_shape_invalid");
 
-    EXPECT_NE(result.exit_code, 0) << "expected failure for unsupported model";
+    EXPECT_EQ(result.exit_code, 2)
+        << "expected semantic verification exit code 2";
     EXPECT_NE(tc::frontend::testutil::ToLower(result.output)
-                  .find("unsupported operator"),
+                  .find("expects rank-2 inputs"),
               std::string::npos)
         << "unexpected diagnostic output:\n"
         << result.output;
-    EXPECT_NE(tc::frontend::testutil::ToLower(result.output).find("import"),
+    EXPECT_NE(tc::frontend::testutil::ToLower(result.output).find("semantic"),
               std::string::npos)
-        << "missing import-stage diagnostic marker:\n"
+        << "missing semantic-stage diagnostic marker:\n"
         << result.output;
 }
 

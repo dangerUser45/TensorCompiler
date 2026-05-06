@@ -52,3 +52,148 @@ set_tests_properties(unsupported_op PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(emit_mlir_test
+  src/emit_mlir_test.cpp
+)
+
+target_link_libraries(emit_mlir_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME emit_mlir
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/single_relu.onnx
+          --expect arith.maximumf
+)
+
+set_tests_properties(emit_mlir PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_test(
+  NAME emit_mlir_two_transposes
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/two_transposes.onnx
+          --expect op=Transpose
+          --expect linalg.transpose
+          --expect tensor<3x2x4xf32>
+)
+
+set_tests_properties(emit_mlir_two_transposes PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_test(
+  NAME emit_mlir_add
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/add.onnx
+          --expect op=Add
+          --expect arith.addf
+)
+
+set_tests_properties(emit_mlir_add PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_test(
+  NAME emit_mlir_matmul
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/matmul_2d.onnx
+          --expect op=MatMul
+          --expect linalg.matmul
+)
+
+set_tests_properties(emit_mlir_matmul PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_test(
+  NAME emit_mlir_matmul_addmm
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/matmul_addmm.onnx
+          --expect op=MatMul
+          --expect linalg.matmul
+          --expect op=Add
+          --expect arith.addf
+)
+
+set_tests_properties(emit_mlir_matmul_addmm PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_executable(verify_shape_invalid_test
+  src/verify_shape_invalid_test.cpp
+)
+
+target_link_libraries(verify_shape_invalid_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_shape_invalid
+  COMMAND verify_shape_invalid_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/matmul_3d.onnx
+)
+
+set_tests_properties(verify_shape_invalid PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_executable(backend_stage_diagnostic_test
+  src/backend_stage_diagnostic_test.cpp
+)
+
+target_link_libraries(backend_stage_diagnostic_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME backend_stage_diagnostic
+  COMMAND backend_stage_diagnostic_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/single_relu.onnx
+          --output /
+)
+
+set_tests_properties(backend_stage_diagnostic PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_executable(verify_emit_matrix_test
+  src/verify_emit_matrix_test.cpp
+)
+
+target_link_libraries(verify_emit_matrix_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_emit_matrix
+  COMMAND verify_emit_matrix_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --models-dir ${CMAKE_SOURCE_DIR}/models
+)
+
+set_tests_properties(verify_emit_matrix PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

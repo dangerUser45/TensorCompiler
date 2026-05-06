@@ -130,3 +130,27 @@ set_tests_properties(importer_attr_normalization_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(mlir_emitter_test
+  mlir_emitter_test.cpp
+)
+
+target_link_libraries(mlir_emitter_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+target_compile_definitions(mlir_emitter_test PRIVATE
+  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+)
+
+add_test(
+  NAME mlir_emitter_test
+  COMMAND mlir_emitter_test
+)
+
+set_tests_properties(mlir_emitter_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
