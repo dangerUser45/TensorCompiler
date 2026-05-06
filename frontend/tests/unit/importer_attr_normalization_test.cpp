@@ -111,6 +111,29 @@ TEST(ImporterAttrNormalization, ReluUnexpectedAttributeFails)
         << error;
 }
 
+TEST(ImporterAttrNormalization, MulUnexpectedAttributeFails)
+{
+    const auto model = BuildSingleNodeModel("Mul", [](::onnx::NodeProto& node) {
+        node.add_input("rhs");
+
+        auto* attr = node.add_attribute();
+        attr->set_name("axis");
+        attr->set_type(::onnx::AttributeProto_AttributeType_INT);
+        attr->set_i(0);
+    });
+
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("does not support attribute"), std::string::npos)
+        << error;
+}
+
 TEST(ImporterAttrNormalization, TransposeUnknownAttributeFails)
 {
     const auto model =

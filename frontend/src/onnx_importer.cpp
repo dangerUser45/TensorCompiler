@@ -469,6 +469,7 @@ bool NormalizeNodeAttributes(OpKind op_kind,
         switch (op_kind) {
             case OpKind::kRelu:
             case OpKind::kAdd:
+            case OpKind::kMul:
             case OpKind::kMatMul:
                 return SetError(out_error,
                                 "ERROR: " + node_context + " op '" +
