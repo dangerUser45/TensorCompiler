@@ -174,6 +174,31 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
 
+TEST(MlirEmitter, ReluLoweringUsesZeroConstantInsteadOfIdentityMax)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("arith.constant dense<0.0> : tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_EQ(mlir_text.find("arith.maximumf %arg0, %arg0 : tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+}
+
 TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
 {
     ::onnx::ModelProto model;
@@ -310,6 +335,30 @@ TEST(MlirEmitter, MatMulModelRequiresLinalgMatmulLowering)
               std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, GemmBiasAddLowersWithExplicitBroadcastBeforeAdd)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/matmul_addmm.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("linalg.broadcast ins(%arg2 : tensor<4xf32>)"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_EQ(mlir_text.find(", %arg2 : tensor<2x4xf32>"), std::string::npos)
+        << mlir_text;
 }
 
 TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)

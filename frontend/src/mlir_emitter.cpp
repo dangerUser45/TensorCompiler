@@ -135,6 +135,91 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
     return true;
 }
 
+bool IsTensorType(std::string_view type) noexcept
+{
+    return type.size() >= 8 && type.rfind("tensor<", 0) == 0 &&
+           type.back() == '>';
+}
+
+bool ParseTensorTypeShape(std::string_view type,
+                          std::vector<std::string>& out_dims)
+{
+    out_dims.clear();
+    if (!IsTensorType(type)) {
+        return false;
+    }
+
+    const std::string_view body = type.substr(7, type.size() - 8);
+    const std::size_t last_x = body.rfind('x');
+    if (last_x == std::string_view::npos) {
+        return true;
+    }
+
+    const std::string_view dims_part = body.substr(0, last_x);
+    std::size_t start = 0;
+    while (start < dims_part.size()) {
+        const std::size_t sep = dims_part.find('x', start);
+        const std::size_t end =
+            sep == std::string_view::npos ? dims_part.size() : sep;
+        if (end == start) {
+            return false;
+        }
+        out_dims.emplace_back(dims_part.substr(start, end - start));
+        if (sep == std::string_view::npos) {
+            break;
+        }
+        start = sep + 1;
+    }
+    return true;
+}
+
+bool IsBroadcastCompatibleDim(std::string_view in_dim,
+                              std::string_view out_dim) noexcept
+{
+    if (in_dim == out_dim) {
+        return true;
+    }
+    if (in_dim == "1" || in_dim == "?" || out_dim == "?") {
+        return true;
+    }
+    return false;
+}
+
+bool BuildBroadcastDimensions(std::string_view input_type,
+                              std::string_view output_type,
+                              std::string& out_dimensions)
+{
+    std::vector<std::string> input_dims;
+    std::vector<std::string> output_dims;
+    if (!ParseTensorTypeShape(input_type, input_dims) ||
+        !ParseTensorTypeShape(output_type, output_dims)) {
+        return false;
+    }
+    if (input_dims.size() > output_dims.size()) {
+        return false;
+    }
+
+    const std::size_t offset = output_dims.size() - input_dims.size();
+    for (std::size_t axis = 0; axis < output_dims.size(); ++axis) {
+        const std::string_view in_dim =
+            axis < offset ? std::string_view("1")
+                          : std::string_view(input_dims[axis - offset]);
+        if (!IsBroadcastCompatibleDim(in_dim, output_dims[axis])) {
+            return false;
+        }
+    }
+
+    std::ostringstream dims;
+    for (std::size_t i = 0; i < input_dims.size(); ++i) {
+        if (i != 0) {
+            dims << ", ";
+        }
+        dims << (offset + i);
+    }
+    out_dimensions = dims.str();
+    return true;
+}
+
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     std::string& out_mlir_text,
                     std::string& out_error)
@@ -250,6 +335,36 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         }
         return std::string("0");
     };
+    auto MaterializeToType = [&out, &NextTemp](const MlirValue& value,
+                                               const std::string& target_type) {
+        if (value.type == target_type) {
+            return value;
+        }
+
+        std::string dimensions;
+        if (BuildBroadcastDimensions(value.type, target_type, dimensions)) {
+            const std::string init = NextTemp();
+            out << "    " << init << " = tensor.empty() : " << target_type
+                << '\n';
+            const std::string bcast = NextTemp();
+            out << "    " << bcast << " = linalg.broadcast ins(" << value.name
+                << " : " << value.type << ") outs(" << init << " : "
+                << target_type << ") dimensions = [" << dimensions << "]\n";
+            return MlirValue{ bcast, target_type };
+        }
+
+        const std::string cast_tmp = NextTemp();
+        out << "    " << cast_tmp << " = builtin.unrealized_conversion_cast "
+            << value.name << " : " << value.type << " to " << target_type
+            << '\n';
+        return MlirValue{ cast_tmp, target_type };
+    };
+    auto BuildZeroLiteral = [](const std::string& type) {
+        if (IsTensorType(type)) {
+            return std::string("dense<0.0>");
+        }
+        return std::string("0.0");
+    };
 
     for (const auto& node_ptr : graph.get_nodes()) {
         if (!node_ptr) {
@@ -266,22 +381,31 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         switch (node.get_op_kind()) {
             case tc::frontend::OpKind::kRelu: {
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const std::string zero = NextTemp();
+                out << "    " << zero << " = arith.constant "
+                    << BuildZeroLiteral(input.type) << " : " << input.type
+                    << '\n';
                 result =
                     MlirValue{ NextTemp(),
                                ResolveTensorType(output_name, input.type) };
                 out << "    " << result->name << " = arith.maximumf "
-                    << input.name << ", " << input.name << " : " << input.type
+                    << input.name << ", " << zero << " : " << input.type
                     << '\n';
                 break;
             }
 
             case tc::frontend::OpKind::kAdd: {
-                const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
-                const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
-                result = MlirValue{ NextTemp(),
-                                    ResolveTensorType(output_name, lhs.type) };
+                MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
+                MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, lhs.type);
+
+                lhs = MaterializeToType(lhs, result_type);
+                rhs = MaterializeToType(rhs, result_type);
+
+                result = MlirValue{ NextTemp(), result_type };
                 out << "    " << result->name << " = arith.addf " << lhs.name
-                    << ", " << rhs.name << " : " << lhs.type << '\n';
+                    << ", " << rhs.name << " : " << result_type << '\n';
                 break;
             }
 
