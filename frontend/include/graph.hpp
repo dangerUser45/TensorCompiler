@@ -106,6 +106,11 @@ public:
         data_type_ = type;
     }
 
+    bool has_values() const noexcept
+    {
+        return !std::holds_alternative<std::monostate>(values_);
+    }
+
 private:
     TensorData values_ = std::monostate{};
 };

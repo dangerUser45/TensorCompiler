@@ -1092,6 +1092,37 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
         }
     }
 
+    for (const auto& init : graph.get_inits()) {
+        if (!init) {
+            continue;
+        }
+
+        const std::string label = "initializer '" + init->get_name() + "'";
+        if (init->get_data_type().id != DataID::FLOAT) {
+            out_report.add_error("ERROR: executable verifier " + label +
+                                 " must be float32");
+        }
+
+        const auto& shape = init->get_shape();
+        if (shape.empty()) {
+            out_report.add_error("ERROR: executable verifier " + label +
+                                 " must have shape");
+        } else {
+            for (const int64_t dim : shape) {
+                if (dim < 0) {
+                    out_report.add_error("ERROR: executable verifier " + label +
+                                         " must have static shape");
+                    break;
+                }
+            }
+        }
+
+        if (!init->has_values()) {
+            out_report.add_error("ERROR: executable verifier " + label +
+                                 " must have data");
+        }
+    }
+
     return out_report.ok();
 }
 

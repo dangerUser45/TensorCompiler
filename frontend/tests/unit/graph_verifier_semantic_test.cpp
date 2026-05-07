@@ -114,6 +114,18 @@ std::unique_ptr<tc::frontend::Attribute> MakeFloatsAttr(
     return attr;
 }
 
+std::unique_ptr<tc::frontend::Initializers> MakeInitializer(
+    std::string name,
+    std::vector<int64_t> shape,
+    tc::frontend::DataT dtype)
+{
+    auto init = std::make_unique<tc::frontend::Initializers>();
+    init->set_name(std::move(name));
+    init->set_shape(std::move(shape));
+    init->set_data_type(dtype);
+    return init;
+}
+
 TEST(GraphVerifierSemantic, ValidReluGraphPasses)
 {
     auto graph = MakeSingleNodeGraph(
@@ -220,6 +232,85 @@ TEST(GraphVerifierSemantic, ExecutableVerifierRejectsMissingRuntimeOutputShape)
         << DiagnosticsAsString(report);
     EXPECT_TRUE(
         HasDiagnosticContaining(report, "runtime output 'y' must have shape"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsNonFloat32Initializer)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 2 } },
+                                         { "y", { 1, 2 } },
+                                     });
+    tc::frontend::Graph::InitVecT inits;
+    auto init =
+        MakeInitializer("w", { 2 }, tc::frontend::TypeInfo<int32_t>::type);
+    init->set_values<int32_t>({ 1, 2 });
+    inits.push_back(std::move(init));
+    graph.set_inits(std::move(inits));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(
+        HasDiagnosticContaining(report, "initializer 'w' must be float32"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsDynamicInitializerShape)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 2 } },
+                                         { "y", { 1, 2 } },
+                                     });
+    tc::frontend::Graph::InitVecT inits;
+    auto init =
+        MakeInitializer("w", { -1 }, tc::frontend::TypeInfo<float>::type);
+    init->set_values<float>({ 1.0f, 2.0f });
+    inits.push_back(std::move(init));
+    graph.set_inits(std::move(inits));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(HasDiagnosticContaining(
+        report, "initializer 'w' must have static shape"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsInitializerWithoutData)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 2 } },
+                                         { "y", { 1, 2 } },
+                                     });
+    tc::frontend::Graph::InitVecT inits;
+    inits.push_back(
+        MakeInitializer("w", { 2 }, tc::frontend::TypeInfo<float>::type));
+    graph.set_inits(std::move(inits));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(
+        HasDiagnosticContaining(report, "initializer 'w' must have data"))
         << DiagnosticsAsString(report);
 }
 
