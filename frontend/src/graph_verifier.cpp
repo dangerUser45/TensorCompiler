@@ -1039,4 +1039,22 @@ bool VerifyGraphForExecution(const Graph& graph, Report& out_report)
     return out_report.ok();
 }
 
+bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
+{
+    VerifyGraphForExecution(graph, out_report);
+
+    if (graph.get_input_tensors().size() != 1) {
+        out_report.add_error(
+            "ERROR: executable verifier expects exactly 1 runtime input, got " +
+            std::to_string(graph.get_input_tensors().size()));
+    }
+    if (graph.get_output_tensors().size() != 1) {
+        out_report.add_error("ERROR: executable verifier expects exactly 1 "
+                             "runtime output, got " +
+                             std::to_string(graph.get_output_tensors().size()));
+    }
+
+    return out_report.ok();
+}
+
 } // namespace tc::frontend::verify

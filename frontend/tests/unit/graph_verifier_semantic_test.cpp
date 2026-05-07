@@ -125,6 +125,19 @@ TEST(GraphVerifierSemantic, ValidReluGraphPasses)
         << DiagnosticsAsString(report);
 }
 
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsMultipleRuntimeInputs)
+{
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kAdd, "Add", { "x", "b" }, { "y" });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(
+        HasDiagnosticContaining(report, "expects exactly 1 runtime input"))
+        << DiagnosticsAsString(report);
+}
+
 TEST(GraphVerifierSemantic, ReluWithTwoInputsFails)
 {
     auto graph = MakeSingleNodeGraph(
