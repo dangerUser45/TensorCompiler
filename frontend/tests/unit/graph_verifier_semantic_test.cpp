@@ -138,6 +138,91 @@ TEST(GraphVerifierSemantic, ExecutableVerifierRejectsMultipleRuntimeInputs)
         << DiagnosticsAsString(report);
 }
 
+TEST(GraphVerifierSemantic, ExecutableVerifierAcceptsSingleStaticFloat32Relu)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 2 } },
+                                         { "y", { 1, 2 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsNonFloat32RuntimeInput)
+{
+    auto graph =
+        MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                            "Relu",
+                            { "x" },
+                            { "y" },
+                            {},
+                            {
+                                { "x", tc::frontend::TypeInfo<int32_t>::type },
+                                { "y", tc::frontend::TypeInfo<int32_t>::type },
+                            },
+                            {
+                                { "x", { 1, 2 } },
+                                { "y", { 1, 2 } },
+                            });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(
+        HasDiagnosticContaining(report, "runtime input 'x' must be float32"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsDynamicRuntimeInputShape)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, -1 } },
+                                         { "y", { 1, -1 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(HasDiagnosticContaining(
+        report, "runtime input 'x' must have static shape"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierRejectsMissingRuntimeOutputShape)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kRelu,
+                                     "Relu",
+                                     { "x" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 2 } },
+                                         { "y", {} },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(
+        HasDiagnosticContaining(report, "runtime output 'y' must have shape"))
+        << DiagnosticsAsString(report);
+}
+
 TEST(GraphVerifierSemantic, ReluWithTwoInputsFails)
 {
     auto graph = MakeSingleNodeGraph(

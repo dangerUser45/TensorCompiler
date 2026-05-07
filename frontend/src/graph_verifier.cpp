@@ -1054,6 +1054,44 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
                              std::to_string(graph.get_output_tensors().size()));
     }
 
+    auto validate_runtime_tensor = [&out_report](const TensorInfo& tensor,
+                                                 const char* role) {
+        const std::string& name = tensor.get_name();
+        const std::string label =
+            std::string("runtime ") + role + " '" + name + "'";
+
+        if (tensor.get_data_type().id != DataID::FLOAT) {
+            out_report.add_error("ERROR: executable verifier " + label +
+                                 " must be float32");
+        }
+
+        const auto& shape = tensor.get_shape();
+        if (shape.empty()) {
+            out_report.add_error("ERROR: executable verifier " + label +
+                                 " must have shape");
+            return;
+        }
+
+        for (const int64_t dim : shape) {
+            if (dim < 0) {
+                out_report.add_error("ERROR: executable verifier " + label +
+                                     " must have static shape");
+                return;
+            }
+        }
+    };
+
+    for (const auto& input : graph.get_input_tensors()) {
+        if (input) {
+            validate_runtime_tensor(*input, "input");
+        }
+    }
+    for (const auto& output : graph.get_output_tensors()) {
+        if (output) {
+            validate_runtime_tensor(*output, "output");
+        }
+    }
+
     return out_report.ok();
 }
 
