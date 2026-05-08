@@ -114,6 +114,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             kind != tc::frontend::OpKind::kTranspose &&
             kind != tc::frontend::OpKind::kAdd &&
             kind != tc::frontend::OpKind::kMul &&
+            kind != tc::frontend::OpKind::kConv &&
             kind != tc::frontend::OpKind::kMatMul) {
             return false;
         }
@@ -125,10 +126,10 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
                 break;
             case tc::frontend::OpKind::kAdd:
             case tc::frontend::OpKind::kMul:
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
                 break;
-            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 return false;
         }
@@ -202,6 +203,11 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     }
     if (input_dims.size() > output_dims.size()) {
         return false;
+    }
+    if (input_dims.size() == 1 && output_dims.size() >= 2 &&
+        IsBroadcastCompatibleDim(input_dims[0], output_dims[1])) {
+        out_dimensions = "1";
+        return true;
     }
 
     const std::size_t offset = output_dims.size() - input_dims.size();
@@ -544,9 +550,23 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 break;
             }
 
-            case tc::frontend::OpKind::kConv:
-                out_error = "ERROR: unsupported production MLIR op 'Conv'";
-                return false;
+            case tc::frontend::OpKind::kConv: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const MlirValue weight =
+                    ResolveInputValue(node.get_inputs()[1]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                out << "    " << init << " = tensor.empty() : " << result_type
+                    << '\n';
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name
+                    << " = linalg.conv_2d_nchw_fchw ins(" << input.name << ", "
+                    << weight.name << " : " << input.type << ", " << weight.type
+                    << ") outs(" << init << " : " << result_type << ") -> "
+                    << result_type << '\n';
+                break;
+            }
 
             case tc::frontend::OpKind::kUnknown:
                 continue;

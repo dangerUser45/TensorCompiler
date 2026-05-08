@@ -638,6 +638,43 @@ TEST(MlirEmitter, GemmBiasAddLowersWithExplicitBroadcastBeforeAdd)
         << mlir_text;
 }
 
+TEST(MlirEmitter, ConvModelLowersToLinalgConvWithInitializerConstants)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("TODO(tc)"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: "
+                             "tensor<1x2x8x8xf32>) -> "
+                             "tensor<1x2x7x7xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("op=Conv"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.constant dense<[-1.5"), std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("tensor.empty() : tensor<1x2x7x7xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw"), std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.broadcast ins(%cst1 : tensor<2xf32>)"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("dimensions = [1]"), std::string::npos)
+        << mlir_text;
+}
+
 TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
 {
     const auto graph = MakeSingleMatMulGraph();

@@ -51,7 +51,10 @@ TEST(VerifyEmitMatrix, MandatoryModelsPassVerifyAndEmitMlir)
         { "add.onnx", { "arith.addf", "op=Add" } },
         { "matmul_2d.onnx", { "linalg.matmul", "op=MatMul" } },
         { "matmul_addmm.onnx", { "linalg.matmul", "arith.addf" } },
-        { "conv_2d_nchw_fchw.onnx", {}, false },
+        { "conv_2d_nchw_fchw.onnx",
+          { "linalg.conv_2d_nchw_fchw",
+            "op=Conv",
+            "arith.constant dense<[-1.5" } },
     };
 
     for (const auto& test_case : cases) {

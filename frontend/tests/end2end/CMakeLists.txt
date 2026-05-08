@@ -134,6 +134,21 @@ set_tests_properties(emit_mlir_matmul_addmm PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_test(
+  NAME emit_mlir_conv
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/conv_2d_nchw_fchw.onnx
+          --expect op=Conv
+          --expect linalg.conv_2d_nchw_fchw
+          --expect "arith.constant dense<[-1.5"
+)
+
+set_tests_properties(emit_mlir_conv PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_executable(verify_shape_invalid_test
   src/verify_shape_invalid_test.cpp
 )
