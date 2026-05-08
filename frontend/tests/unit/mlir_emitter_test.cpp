@@ -108,6 +108,28 @@ tc::frontend::Graph MakeAddWithInitializerGraph()
     return graph;
 }
 
+tc::frontend::Graph MakeAddWithUsedAndUnusedInitializerGraph()
+{
+    tc::frontend::Graph graph = MakeAddWithInitializerGraph();
+
+    tc::frontend::Graph::InitVecT inits;
+
+    auto bias = std::make_unique<tc::frontend::Initializers>();
+    bias->set_name("bias");
+    bias->set_shape({ 2 });
+    bias->set_values<float>({ 1.0f, 2.0f });
+    inits.push_back(std::move(bias));
+
+    auto unused = std::make_unique<tc::frontend::Initializers>();
+    unused->set_name("unused");
+    unused->set_shape({ 2 });
+    unused->set_values<float>({ 3.0f, 4.0f });
+    inits.push_back(std::move(unused));
+
+    graph.set_inits(std::move(inits));
+    return graph;
+}
+
 tc::frontend::Graph MakeSingleMulGraph()
 {
     tc::frontend::Graph graph;
@@ -459,6 +481,22 @@ TEST(MlirEmitter, InitializerOperandEmitsConstantAndNotFunctionArgument)
     EXPECT_NE(mlir_text.find("linalg.broadcast"), std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, UnusedInitializerDoesNotEmitConstant)
+{
+    const auto graph = MakeAddWithUsedAndUnusedInitializerGraph();
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("dense<[1.0, 2.0]>"), std::string::npos)
+        << mlir_text;
+    EXPECT_EQ(mlir_text.find("dense<[3.0, 4.0]>"), std::string::npos)
+        << mlir_text;
 }
 
 TEST(MlirEmitter, MulGraphEmitsTypedMainWithMulf)

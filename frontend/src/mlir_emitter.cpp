@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -333,7 +334,8 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         };
     }
 
-    std::size_t const_id = 0;
+    std::unordered_map<std::string, const tc::frontend::Initializers*>
+        initializers_by_name;
     for (const auto& init_ptr : graph.get_inits()) {
         if (!init_ptr) {
             continue;
@@ -349,23 +351,39 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 *init_ptr, init_type, out_error, "initializer")) {
             return false;
         }
-
-        const std::string const_name = "%cst" + std::to_string(const_id++);
-        out << "    " << const_name << " = arith.constant "
-            << BuildDenseFloatLiteral(init_ptr->get_values<float>()) << " : "
-            << init_type << '\n';
-        values_by_tensor[init_ptr->get_name()] = { const_name, init_type };
         tensor_types[init_ptr->get_name()] = init_type;
+        initializers_by_name[init_ptr->get_name()] = init_ptr.get();
     }
 
+    std::size_t const_id = 0;
     std::size_t temp_id = 0;
     auto NextTemp = [&temp_id]() { return "%t" + std::to_string(temp_id++); };
     auto ResolveInputValue = [&values_by_tensor,
+                              &initializers_by_name,
+                              &const_id,
+                              &out,
                               &input_types](const std::string& tensor_name) {
         const auto it = values_by_tensor.find(tensor_name);
         if (it != values_by_tensor.end()) {
             return it->second;
         }
+
+        const auto init_it = initializers_by_name.find(tensor_name);
+        if (init_it != initializers_by_name.end()) {
+            const auto& init = *init_it->second;
+            const std::string const_name = "%cst" + std::to_string(const_id++);
+            std::string init_type;
+            std::string ignored_error;
+            (void)BuildMlirTensorType(
+                init, init_type, ignored_error, "initializer");
+            out << "    " << const_name << " = arith.constant "
+                << BuildDenseFloatLiteral(init.get_values<float>()) << " : "
+                << init_type << '\n';
+            const MlirValue value{ const_name, init_type };
+            values_by_tensor[tensor_name] = value;
+            return value;
+        }
+
         return MlirValue{ "%arg0", input_types.front() };
     };
     auto ResolveTensorType = [&tensor_types](const std::string& tensor_name,
