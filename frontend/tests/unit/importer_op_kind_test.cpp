@@ -151,6 +151,23 @@ TEST(ImporterOpKind, MulSetsMulKind)
     EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kMul);
 }
 
+TEST(ImporterOpKind, ConvFixtureSetsConvAndBiasAddKinds)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        ModelPath("conv_2d_nchw_fchw.onnx").string(), model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 2u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    ASSERT_NE(graph.get_nodes()[1], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kConv);
+    EXPECT_EQ(graph.get_nodes()[1]->get_op_kind(), tc::frontend::OpKind::kAdd);
+}
+
 TEST(ImporterOpKind, UnsupportedModelStillFails)
 {
     ::onnx::ModelProto model;

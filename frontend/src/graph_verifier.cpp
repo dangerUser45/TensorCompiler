@@ -183,6 +183,13 @@ private:
             return;
         }
 
+        if (op_kind == tc::frontend::OpKind::kConv) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' is not supported by semantic "
+                              "verifier yet");
+            return;
+        }
+
         switch (op_kind) {
             case tc::frontend::OpKind::kRelu:
                 if (input_count != 1) {
@@ -216,6 +223,7 @@ private:
                         node_context, op_kind, "output(s)", 1, output_count);
                 }
                 break;
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 break;
         }
@@ -384,6 +392,7 @@ private:
                 break;
             }
 
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -667,6 +676,7 @@ private:
                 return;
             }
 
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -836,6 +846,7 @@ private:
                 case tc::frontend::OpKind::kAdd:
                 case tc::frontend::OpKind::kMul:
                 case tc::frontend::OpKind::kMatMul:
+                case tc::frontend::OpKind::kConv:
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +
                         std::string(tc::frontend::ToString(op_kind)) +

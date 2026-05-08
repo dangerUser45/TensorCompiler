@@ -128,6 +128,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
                 break;
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 return false;
         }
@@ -542,6 +543,10 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     << BuildPermutation(node) << "]\n";
                 break;
             }
+
+            case tc::frontend::OpKind::kConv:
+                out_error = "ERROR: unsupported production MLIR op 'Conv'";
+                return false;
 
             case tc::frontend::OpKind::kUnknown:
                 continue;

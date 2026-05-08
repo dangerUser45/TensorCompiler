@@ -8,6 +8,7 @@
 #include <fstream>
 #include <google/protobuf/repeated_field.h>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -438,11 +439,186 @@ bool BuildNodeAttributes(const ::onnx::NodeProto& src,
     return true;
 }
 
+std::unique_ptr<Attribute> MakeIntAttr(std::string name,
+                                       std::vector<int64_t> values)
+{
+    auto attr = std::make_unique<Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<int64_t>(std::move(values));
+    return attr;
+}
+
+std::unique_ptr<Attribute> MakeStringAttr(std::string name, std::string value)
+{
+    auto attr = std::make_unique<Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<std::string>({ std::move(value) });
+    return attr;
+}
+
+const Attribute* FindAttribute(const Node::AttrVecT& attrs,
+                               std::string_view name)
+{
+    for (const auto& attr : attrs) {
+        if (attr && attr->get_name() == name) {
+            return attr.get();
+        }
+    }
+    return nullptr;
+}
+
+bool ValidateIntAttrLength(const Attribute& attr,
+                           std::size_t expected_size,
+                           std::string& out_error,
+                           const std::string& node_context)
+{
+    if (attr.get_data_type().id != DataID::INT64) {
+        return SetError(out_error,
+                        "ERROR: " + node_context + " op 'Conv' attribute '" +
+                            attr.get_name() + "' must be INTS");
+    }
+    if (attr.get_values<int64_t>().size() != expected_size) {
+        return SetError(out_error,
+                        "ERROR: " + node_context + " op 'Conv' attribute '" +
+                            attr.get_name() + "' must have " +
+                            std::to_string(expected_size) + " values");
+    }
+    return true;
+}
+
+bool NormalizeConvAttributes(Node::AttrVecT& attrs,
+                             std::string& out_error,
+                             const std::string& node_context,
+                             const std::vector<int64_t>* inferred_kernel_shape)
+{
+    std::unordered_set<std::string> seen_names;
+    seen_names.reserve(attrs.size());
+
+    bool has_kernel_shape = false;
+    bool has_strides = false;
+    bool has_pads = false;
+    bool has_dilations = false;
+    bool has_group = false;
+    bool has_auto_pad = false;
+
+    for (std::size_t i = 0; i < attrs.size(); ++i) {
+        if (!attrs[i]) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] is null");
+        }
+        const std::string& attr_name = attrs[i]->get_name();
+        if (attr_name.empty()) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] has empty name");
+        }
+        if (!seen_names.insert(attr_name).second) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " has duplicate attribute '" + attr_name + "'");
+        }
+
+        if (attr_name == "kernel_shape") {
+            has_kernel_shape = true;
+            if (!ValidateIntAttrLength(*attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            continue;
+        }
+        if (attr_name == "strides") {
+            has_strides = true;
+            if (!ValidateIntAttrLength(*attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            continue;
+        }
+        if (attr_name == "pads") {
+            has_pads = true;
+            if (!ValidateIntAttrLength(*attrs[i], 4, out_error, node_context)) {
+                return false;
+            }
+            continue;
+        }
+        if (attr_name == "dilations") {
+            has_dilations = true;
+            if (!ValidateIntAttrLength(*attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            continue;
+        }
+        if (attr_name == "group") {
+            has_group = true;
+            if (attrs[i]->get_data_type().id != DataID::INT64 ||
+                attrs[i]->get_values<int64_t>().size() != 1) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'Conv' attribute 'group' must be INT");
+            }
+            continue;
+        }
+        if (attr_name == "auto_pad") {
+            has_auto_pad = true;
+            if (attrs[i]->get_data_type().id != DataID::STRING ||
+                attrs[i]->get_values<std::string>().size() != 1) {
+                return SetError(
+                    out_error,
+                    "ERROR: " + node_context +
+                        " op 'Conv' attribute 'auto_pad' must be STRING");
+            }
+            const auto& value = attrs[i]->get_values<std::string>().front();
+            if (value != "NOTSET") {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'Conv' supports only auto_pad=NOTSET");
+            }
+            continue;
+        }
+
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " op 'Conv' has unsupported attribute '" +
+                            attr_name + "'");
+    }
+
+    if (!has_kernel_shape) {
+        if (inferred_kernel_shape == nullptr ||
+            inferred_kernel_shape->size() != 2) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Conv' cannot infer kernel_shape");
+        }
+        attrs.push_back(MakeIntAttr("kernel_shape", *inferred_kernel_shape));
+    }
+    if (!has_strides) {
+        attrs.push_back(MakeIntAttr("strides", { 1, 1 }));
+    }
+    if (!has_pads) {
+        attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
+    }
+    if (!has_dilations) {
+        attrs.push_back(MakeIntAttr("dilations", { 1, 1 }));
+    }
+    if (!has_group) {
+        attrs.push_back(MakeIntAttr("group", { 1 }));
+    }
+    if (!has_auto_pad) {
+        attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
+    }
+    return true;
+}
+
 bool NormalizeNodeAttributes(OpKind op_kind,
                              Node::AttrVecT& attrs,
                              std::string& out_error,
-                             const std::string& node_context)
+                             const std::string& node_context,
+                             const std::vector<int64_t>* inferred_kernel_shape)
 {
+    if (op_kind == OpKind::kConv) {
+        return NormalizeConvAttributes(
+            attrs, out_error, node_context, inferred_kernel_shape);
+    }
+
     std::unordered_set<std::string> seen_names;
     seen_names.reserve(attrs.size());
 
@@ -470,6 +646,7 @@ bool NormalizeNodeAttributes(OpKind op_kind,
             case OpKind::kRelu:
             case OpKind::kAdd:
             case OpKind::kMul:
+            case OpKind::kConv:
             case OpKind::kMatMul:
                 return SetError(out_error,
                                 "ERROR: " + node_context + " op '" +
@@ -504,7 +681,9 @@ bool NormalizeNodeAttributes(OpKind op_kind,
 bool ParseNode(const ::onnx::NodeProto& src,
                std::vector<std::unique_ptr<Node>>& out_nodes,
                std::string& out_error,
-               int node_index)
+               int node_index,
+               const std::unordered_map<std::string, std::vector<int64_t>>&
+                   initializer_shapes)
 {
     const std::string node_context = BuildNodeContext(src, node_index);
     const std::string& op_type = src.op_type();
@@ -674,14 +853,62 @@ bool ParseNode(const ::onnx::NodeProto& src,
     }
     node->set_outputs(std::move(outputs));
 
+    if (op_kind == OpKind::kConv) {
+        if (src.input_size() < 2 || src.input_size() > 3) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Conv' expects 2 or 3 inputs");
+        }
+        if (src.output_size() != 1) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Conv' expects 1 output");
+        }
+    }
+
     Node::AttrVecT attrs;
     if (!BuildNodeAttributes(src, attrs, out_error, node_context)) {
         return false;
     }
-    if (!NormalizeNodeAttributes(op_kind, attrs, out_error, node_context)) {
+    std::vector<int64_t> inferred_kernel_shape;
+    const std::vector<int64_t>* inferred_kernel_shape_ptr = nullptr;
+    if (op_kind == OpKind::kConv && src.input_size() >= 2) {
+        const auto weight_it = initializer_shapes.find(src.input(1));
+        if (weight_it != initializer_shapes.end() &&
+            weight_it->second.size() == 4) {
+            inferred_kernel_shape = { weight_it->second[2],
+                                      weight_it->second[3] };
+            inferred_kernel_shape_ptr = &inferred_kernel_shape;
+        }
+    }
+    if (!NormalizeNodeAttributes(op_kind,
+                                 attrs,
+                                 out_error,
+                                 node_context,
+                                 inferred_kernel_shape_ptr)) {
         return false;
     }
     node->set_attr(std::move(attrs));
+
+    if (op_kind == OpKind::kConv && src.input_size() == 3) {
+        const std::string final_output = src.output(0);
+        const std::string conv_output =
+            final_output + "__conv_" + std::to_string(node_index);
+        node->set_inputs({ src.input(0), src.input(1) });
+        node->set_outputs({ conv_output });
+        out_nodes.push_back(std::move(node));
+
+        auto add_node = std::make_unique<Node>();
+        add_node->set_name_node(src.name().empty()
+                                    ? "conv_add_" + std::to_string(node_index)
+                                    : src.name() + ".add");
+        add_node->set_name_op("Add");
+        add_node->set_op_kind(OpKind::kAdd);
+        add_node->set_inputs({ conv_output, src.input(2) });
+        add_node->set_outputs({ final_output });
+        out_nodes.push_back(std::move(add_node));
+        return true;
+    }
 
     out_nodes.push_back(std::move(node));
     return true;
@@ -693,9 +920,22 @@ bool BuildNodes(const ::onnx::GraphProto& g,
 {
     out_nodes.clear();
 
+    std::unordered_map<std::string, std::vector<int64_t>> initializer_shapes;
+    initializer_shapes.reserve(g.initializer_size());
+    for (int i = 0; i < g.initializer_size(); ++i) {
+        const auto& init = g.initializer(i);
+        std::vector<int64_t> shape;
+        shape.reserve(init.dims_size());
+        for (int d = 0; d < init.dims_size(); ++d) {
+            shape.push_back(init.dims(d));
+        }
+        initializer_shapes[init.name()] = std::move(shape);
+    }
+
     out_nodes.reserve(g.node_size() * 2);
     for (int i = 0; i < g.node_size(); ++i) {
-        if (!ParseNode(g.node(i), out_nodes, out_error, i)) {
+        if (!ParseNode(
+                g.node(i), out_nodes, out_error, i, initializer_shapes)) {
             return false;
         }
     }

@@ -53,6 +53,53 @@ void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
     return model;
 }
 
+::onnx::ModelProto BuildConvModel(
+    const std::function<void(::onnx::NodeProto&)>& configure_node)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_conv_attr_norm_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 2, 8, 8 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 2, 7, 7 });
+    auto* weight = graph->add_initializer();
+    weight->set_name("w");
+    weight->set_data_type(::onnx::TensorProto_DataType_FLOAT);
+    weight->add_dims(2);
+    weight->add_dims(2);
+    weight->add_dims(2);
+    weight->add_dims(2);
+    for (int i = 0; i < 16; ++i) {
+        weight->add_float_data(1.0f);
+    }
+
+    auto* node = graph->add_node();
+    node->set_name("conv0");
+    node->set_op_type("Conv");
+    node->add_input("x");
+    node->add_input("w");
+    node->add_output("y");
+
+    configure_node(*node);
+    return model;
+}
+
+const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
+                                        const std::string& name)
+{
+    for (const auto& attr : node.get_attrs()) {
+        if (attr && attr->get_name() == name) {
+            return attr.get();
+        }
+    }
+    return nullptr;
+}
+
 class TempModelFile final
 {
 public:
@@ -186,4 +233,125 @@ TEST(ImporterAttrNormalization, TransposePermIsImportedAsInt64Vector)
     EXPECT_EQ(attrs[0]->get_name(), "perm");
     EXPECT_EQ(attrs[0]->get_data_type().id, tc::frontend::DataID::INT64);
     EXPECT_EQ(attrs[0]->get_values<int64_t>(), (std::vector<int64_t>{ 1, 0 }));
+}
+
+TEST(ImporterAttrNormalization, ConvImportsDefaultAttributes)
+{
+    const TempModelFile temp_model(BuildConvModel([](::onnx::NodeProto&) {}));
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    const auto& node = *graph.get_nodes()[0];
+    EXPECT_EQ(node.get_op_kind(), tc::frontend::OpKind::kConv);
+
+    ASSERT_NE(FindAttr(node, "kernel_shape"), nullptr);
+    EXPECT_EQ(FindAttr(node, "kernel_shape")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 2, 2 }));
+    ASSERT_NE(FindAttr(node, "strides"), nullptr);
+    EXPECT_EQ(FindAttr(node, "strides")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 1, 1 }));
+    ASSERT_NE(FindAttr(node, "pads"), nullptr);
+    EXPECT_EQ(FindAttr(node, "pads")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 0, 0, 0, 0 }));
+    ASSERT_NE(FindAttr(node, "dilations"), nullptr);
+    EXPECT_EQ(FindAttr(node, "dilations")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 1, 1 }));
+    ASSERT_NE(FindAttr(node, "group"), nullptr);
+    EXPECT_EQ(FindAttr(node, "group")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 1 }));
+    ASSERT_NE(FindAttr(node, "auto_pad"), nullptr);
+    EXPECT_EQ(FindAttr(node, "auto_pad")->get_values<std::string>(),
+              (std::vector<std::string>{ "NOTSET" }));
+}
+
+TEST(ImporterAttrNormalization, ConvPreservesExplicitAttributes)
+{
+    const auto model = BuildConvModel([](::onnx::NodeProto& node) {
+        auto* kernel = node.add_attribute();
+        kernel->set_name("kernel_shape");
+        kernel->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        kernel->add_ints(3);
+        kernel->add_ints(3);
+
+        auto* pads = node.add_attribute();
+        pads->set_name("pads");
+        pads->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        pads->add_ints(1);
+        pads->add_ints(1);
+        pads->add_ints(1);
+        pads->add_ints(1);
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    const auto& node = *graph.get_nodes()[0];
+    ASSERT_NE(FindAttr(node, "kernel_shape"), nullptr);
+    EXPECT_EQ(FindAttr(node, "kernel_shape")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 3, 3 }));
+    ASSERT_NE(FindAttr(node, "pads"), nullptr);
+    EXPECT_EQ(FindAttr(node, "pads")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 1, 1, 1, 1 }));
+}
+
+TEST(ImporterAttrNormalization, ConvUnsupportedAutoPadFails)
+{
+    const auto model = BuildConvModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("auto_pad");
+        attr->set_type(::onnx::AttributeProto_AttributeType_STRING);
+        attr->set_s("SAME_UPPER");
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, ConvWithBiasNormalizesToConvAdd)
+{
+    const auto model =
+        BuildConvModel([](::onnx::NodeProto& node) { node.add_input("bias"); });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 2u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    ASSERT_NE(graph.get_nodes()[1], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kConv);
+    EXPECT_EQ(graph.get_nodes()[1]->get_op_kind(), tc::frontend::OpKind::kAdd);
+    EXPECT_EQ(graph.get_nodes()[0]->get_inputs(),
+              (std::vector<std::string>{ "x", "w" }));
+    EXPECT_EQ(graph.get_nodes()[1]->get_inputs(),
+              (std::vector<std::string>{ "y__conv_0", "bias" }));
+    EXPECT_EQ(graph.get_nodes()[1]->get_outputs(),
+              (std::vector<std::string>{ "y" }));
 }
