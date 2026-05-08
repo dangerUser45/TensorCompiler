@@ -267,7 +267,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     out << "module {\n";
     out << "  // tc.graph: " << GraphNameOrFallback(graph) << '\n';
     out << "  // tc.node_count: " << graph.get_nodes().size() << '\n';
-    out << "  func.func @main(";
+    out << "  func.func @tc_model(";
     for (std::size_t i = 0; i < input_types.size(); ++i) {
         if (i != 0) {
             out << ", ";

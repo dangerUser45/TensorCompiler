@@ -272,7 +272,7 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
                              "implemented yet."),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>) -> "
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: tensor<1x2xf32>) -> "
                              "tensor<1x2xf32>"),
               std::string::npos)
         << mlir_text;
@@ -326,7 +326,7 @@ TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
                              "implemented yet."),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<2x3x4xf32>) -> "
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: tensor<2x3x4xf32>) -> "
                              "tensor<3x2x4xf32>"),
               std::string::npos)
         << mlir_text;
@@ -357,9 +357,10 @@ TEST(MlirEmitter, AddGraphEmitsTypedMainWithTwoArguments)
                              "implemented yet."),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
-                             "tensor<1x2xf32>) -> tensor<1x2xf32>"),
-              std::string::npos)
+    EXPECT_NE(
+        mlir_text.find("func.func @tc_model(%arg0: tensor<1x2xf32>, %arg1: "
+                       "tensor<1x2xf32>) -> tensor<1x2xf32>"),
+        std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
@@ -407,9 +408,10 @@ TEST(MlirEmitter, MulGraphEmitsTypedMainWithMulf)
                              "implemented yet."),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
-                             "tensor<1x2xf32>) -> tensor<1x2xf32>"),
-              std::string::npos)
+    EXPECT_NE(
+        mlir_text.find("func.func @tc_model(%arg0: tensor<1x2xf32>, %arg1: "
+                       "tensor<1x2xf32>) -> tensor<1x2xf32>"),
+        std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("op=Mul"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("arith.mulf"), std::string::npos) << mlir_text;
@@ -464,9 +466,10 @@ TEST(MlirEmitter, MatMulGraphEmitsTypedMainWithTwoArguments)
                              "implemented yet."),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("func.func @main(%arg0: tensor<1x2xf32>, %arg1: "
-                             "tensor<2x4xf32>) -> tensor<1x4xf32>"),
-              std::string::npos)
+    EXPECT_NE(
+        mlir_text.find("func.func @tc_model(%arg0: tensor<1x2xf32>, %arg1: "
+                       "tensor<2x4xf32>) -> tensor<1x4xf32>"),
+        std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("linalg.matmul"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("tensor.empty() : tensor<1x4xf32>"),
