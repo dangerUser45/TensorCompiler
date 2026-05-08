@@ -155,6 +155,27 @@ set_tests_properties(verify_shape_invalid PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_executable(verify_exec_test
+  src/verify_exec_test.cpp
+)
+
+target_link_libraries(verify_exec_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_exec
+  COMMAND verify_exec_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/add.onnx
+)
+
+set_tests_properties(verify_exec PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_executable(backend_stage_diagnostic_test
   src/backend_stage_diagnostic_test.cpp
 )

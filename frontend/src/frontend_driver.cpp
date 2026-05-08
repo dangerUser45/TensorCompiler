@@ -34,6 +34,7 @@ struct Options final
     std::string hash_path;
     std::string mlir_path;
     bool verify = false;
+    bool verify_exec = false;
     bool dump_requested = false;
     bool hash_requested = false;
     bool emit_mlir_requested = false;
@@ -42,7 +43,7 @@ struct Options final
 inline std::string BuildUsage(const char* argv0)
 {
     return std::string("Usage: ") + argv0 +
-           " <model.onnx> [--verify] [--dump[=<output.dot>]] "
+           " <model.onnx> [--verify] [--verify-exec] [--dump[=<output.dot>]] "
            "[--hash[=<output.hash>]] [--emit-mlir[=<output.mlir>]]";
 }
 
@@ -68,6 +69,7 @@ bool ParseArgs(int argc,
 
     static const option kLongOptions[] = {
         { "verify", no_argument, nullptr, 'v' },
+        { "verify-exec", no_argument, nullptr, 'x' },
         { "dump", optional_argument, nullptr, 'd' },
         { "hash", optional_argument, nullptr, 'h' },
         { "emit-mlir", optional_argument, nullptr, 'm' },
@@ -83,6 +85,9 @@ bool ParseArgs(int argc,
         switch (opt) {
             case 'v':
                 out_options.verify = true;
+                break;
+            case 'x':
+                out_options.verify_exec = true;
                 break;
             case 'd':
                 out_options.dump_requested = true;
@@ -239,10 +244,13 @@ int main(int argc, char** argv)
     }
 
     bool verified = true;
-    if (options.verify) {
+    if (options.verify || options.verify_exec) {
         tc::frontend::verify::Report report;
-        verified =
-            tc::frontend::verify::VerifyGraphForExecution(graph_ir, report);
+        verified = options.verify_exec
+                       ? tc::frontend::verify::VerifyGraphForExecutable(
+                             graph_ir, report)
+                       : tc::frontend::verify::VerifyGraphForExecution(graph_ir,
+                                                                       report);
         PrintVerifyReport(report);
     }
 
@@ -324,7 +332,7 @@ int main(int argc, char** argv)
         std::cout << "MLIR written to: " << options.mlir_path << '\n';
     }
 
-    if (options.verify && !verified) {
+    if ((options.verify || options.verify_exec) && !verified) {
         return 2;
     }
 
