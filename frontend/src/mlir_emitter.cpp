@@ -1,5 +1,6 @@
 #include "mlir_emitter.hpp"
 
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -222,6 +223,37 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     return true;
 }
 
+std::string FormatFloatLiteral(float value)
+{
+    std::ostringstream out;
+    out << std::setprecision(9) << value;
+    std::string text = out.str();
+    if (text.find('.') == std::string::npos &&
+        text.find('e') == std::string::npos &&
+        text.find('E') == std::string::npos) {
+        text += ".0";
+    }
+    return text;
+}
+
+std::string BuildDenseFloatLiteral(const std::vector<float>& values)
+{
+    if (values.size() == 1) {
+        return "dense<" + FormatFloatLiteral(values.front()) + ">";
+    }
+
+    std::ostringstream out;
+    out << "dense<[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << FormatFloatLiteral(values[i]);
+    }
+    out << "]>";
+    return out.str();
+}
+
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     std::string& out_mlir_text,
                     std::string& out_error)
@@ -299,6 +331,31 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             "%arg" + std::to_string(i),
             input_types[i],
         };
+    }
+
+    std::size_t const_id = 0;
+    for (const auto& init_ptr : graph.get_inits()) {
+        if (!init_ptr) {
+            continue;
+        }
+        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT) {
+            out_error = "ERROR: unsupported non-float32 initializer '" +
+                        init_ptr->get_name() + "' for production MLIR";
+            return false;
+        }
+
+        std::string init_type;
+        if (!BuildMlirTensorType(
+                *init_ptr, init_type, out_error, "initializer")) {
+            return false;
+        }
+
+        const std::string const_name = "%cst" + std::to_string(const_id++);
+        out << "    " << const_name << " = arith.constant "
+            << BuildDenseFloatLiteral(init_ptr->get_values<float>()) << " : "
+            << init_type << '\n';
+        values_by_tensor[init_ptr->get_name()] = { const_name, init_type };
+        tensor_types[init_ptr->get_name()] = init_type;
     }
 
     std::size_t temp_id = 0;

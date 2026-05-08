@@ -73,6 +73,41 @@ tc::frontend::Graph MakeSingleAddGraph()
     return graph;
 }
 
+tc::frontend::Graph MakeAddWithInitializerGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("add_initializer_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(MakeTensor("x", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(MakeTensor("z", { 1, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    tc::frontend::Graph::InitVecT inits;
+    auto bias = std::make_unique<tc::frontend::Initializers>();
+    bias->set_name("bias");
+    bias->set_shape({ 2 });
+    bias->set_values<float>({ 1.0f, 2.0f });
+    inits.push_back(std::move(bias));
+    graph.set_inits(std::move(inits));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("add_bias");
+    node->set_name_op("Add");
+    node->set_op_kind(tc::frontend::OpKind::kAdd);
+    node->set_inputs({ "x", "bias" });
+    node->set_outputs({ "z" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
 tc::frontend::Graph MakeSingleMulGraph()
 {
     tc::frontend::Graph graph;
@@ -400,6 +435,30 @@ TEST(MlirEmitter, AddModelRequiresArithmeticAddLowering)
 
     EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
+}
+
+TEST(MlirEmitter, InitializerOperandEmitsConstantAndNotFunctionArgument)
+{
+    const auto graph = MakeAddWithInitializerGraph();
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error))
+        << error;
+
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: tensor<1x2xf32>) -> "
+                             "tensor<1x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+    EXPECT_EQ(mlir_text.find("%arg1"), std::string::npos) << mlir_text;
+    EXPECT_NE(
+        mlir_text.find("arith.constant dense<[1.0, 2.0]> : tensor<2xf32>"),
+        std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.broadcast"), std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
 }
 
 TEST(MlirEmitter, MulGraphEmitsTypedMainWithMulf)
