@@ -255,6 +255,21 @@ std::string BuildDenseFloatLiteral(const std::vector<float>& values)
     return out.str();
 }
 
+std::string EmitFloatInitializerConstant(std::ostream& out,
+                                         const tc::frontend::Initializers& init,
+                                         std::size_t& const_id)
+{
+    std::string init_type;
+    std::string ignored_error;
+    (void)BuildMlirTensorType(init, init_type, ignored_error, "initializer");
+
+    const std::string const_name = "%cst" + std::to_string(const_id++);
+    out << "    " << const_name << " = arith.constant "
+        << BuildDenseFloatLiteral(init.get_values<float>()) << " : "
+        << init_type << '\n';
+    return const_name;
+}
+
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     std::string& out_mlir_text,
                     std::string& out_error)
@@ -360,6 +375,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     auto NextTemp = [&temp_id]() { return "%t" + std::to_string(temp_id++); };
     auto ResolveInputValue = [&values_by_tensor,
                               &initializers_by_name,
+                              &tensor_types,
                               &const_id,
                               &out,
                               &input_types](const std::string& tensor_name) {
@@ -371,14 +387,9 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         const auto init_it = initializers_by_name.find(tensor_name);
         if (init_it != initializers_by_name.end()) {
             const auto& init = *init_it->second;
-            const std::string const_name = "%cst" + std::to_string(const_id++);
-            std::string init_type;
-            std::string ignored_error;
-            (void)BuildMlirTensorType(
-                init, init_type, ignored_error, "initializer");
-            out << "    " << const_name << " = arith.constant "
-                << BuildDenseFloatLiteral(init.get_values<float>()) << " : "
-                << init_type << '\n';
+            const std::string const_name =
+                EmitFloatInitializerConstant(out, init, const_id);
+            const std::string init_type = tensor_types.at(tensor_name);
             const MlirValue value{ const_name, init_type };
             values_by_tensor[tensor_name] = value;
             return value;
