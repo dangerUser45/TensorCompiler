@@ -306,8 +306,7 @@ int main(int argc, char** argv)
         }
 
         std::string mlir_text;
-        if (!tc::frontend::mlir::EmitMlirModuleSkeleton(
-                graph_ir, mlir_text, error)) {
+        if (!tc::frontend::mlir::EmitMlirModule(graph_ir, mlir_text, error)) {
             PrintStageError("backend",
                             error.empty() ? "ERROR: failed to emit MLIR"
                                           : error);

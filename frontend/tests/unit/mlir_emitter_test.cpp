@@ -251,6 +251,21 @@ TEST(MlirEmitter, UsesFallbackGraphNameForUnnamedGraph)
     EXPECT_EQ(mlir_text, expected);
 }
 
+TEST(MlirEmitter, ProductionMlirFailsInsteadOfReturningTodoFallback)
+{
+    tc::frontend::Graph graph;
+    graph.set_name("unsupported_for_production");
+
+    std::string mlir_text;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error));
+    EXPECT_TRUE(mlir_text.empty()) << mlir_text;
+    EXPECT_NE(error.find("unsupported graph for production MLIR"),
+              std::string::npos)
+        << error;
+}
+
 TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
 {
     ::onnx::ModelProto model;
