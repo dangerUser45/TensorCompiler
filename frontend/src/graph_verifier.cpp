@@ -106,6 +106,17 @@ bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
                            const std::vector<int64_t>& rhs_shape,
                            std::vector<int64_t>& out_shape)
 {
+    if (lhs_shape.size() >= 2 && rhs_shape.size() == 1 &&
+        BroadcastDimsCompatible(lhs_shape[1], rhs_shape[0])) {
+        out_shape = lhs_shape;
+        return true;
+    }
+    if (rhs_shape.size() >= 2 && lhs_shape.size() == 1 &&
+        BroadcastDimsCompatible(rhs_shape[1], lhs_shape[0])) {
+        out_shape = rhs_shape;
+        return true;
+    }
+
     const std::size_t rank = std::max(lhs_shape.size(), rhs_shape.size());
     out_shape.assign(rank, -1);
 
@@ -124,6 +135,58 @@ bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
     }
 
     return true;
+}
+
+const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
+                                        std::string_view name)
+{
+    for (const auto& attr : node.get_attrs()) {
+        if (attr && attr->get_name() == name) {
+            return attr.get();
+        }
+    }
+    return nullptr;
+}
+
+bool ReadRequiredIntAttr(const tc::frontend::Node& node,
+                         const std::string& node_context,
+                         std::string_view attr_name,
+                         std::size_t expected_size,
+                         tc::frontend::verify::Report& report,
+                         std::vector<int64_t>& out_values)
+{
+    out_values.clear();
+    const auto* attr = FindAttr(node, attr_name);
+    if (attr == nullptr) {
+        report.add_error("ERROR: " + node_context + " op 'Conv' missing " +
+                         std::string(attr_name));
+        return false;
+    }
+    if (attr->get_data_type().id != tc::frontend::DataID::INT64) {
+        report.add_error("ERROR: " + node_context + " op 'Conv' attribute '" +
+                         std::string(attr_name) + "' must be INT64");
+        return false;
+    }
+    out_values = attr->get_values<int64_t>();
+    if (out_values.size() != expected_size) {
+        report.add_error("ERROR: " + node_context + " op 'Conv' attribute '" +
+                         std::string(attr_name) + "' must have " +
+                         std::to_string(expected_size) + " values");
+        return false;
+    }
+    return true;
+}
+
+bool AllPositive(const std::vector<int64_t>& values)
+{
+    return std::all_of(
+        values.begin(), values.end(), [](int64_t value) { return value > 0; });
+}
+
+bool AllNonNegative(const std::vector<int64_t>& values)
+{
+    return std::all_of(
+        values.begin(), values.end(), [](int64_t value) { return value >= 0; });
 }
 
 class ExecutionVerifierVisitor final
@@ -183,13 +246,6 @@ private:
             return;
         }
 
-        if (op_kind == tc::frontend::OpKind::kConv) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Conv' is not supported by semantic "
-                              "verifier yet");
-            return;
-        }
-
         switch (op_kind) {
             case tc::frontend::OpKind::kRelu:
                 if (input_count != 1) {
@@ -204,6 +260,7 @@ private:
             case tc::frontend::OpKind::kAdd:
             case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul:
+            case tc::frontend::OpKind::kConv:
                 if (input_count != 2) {
                     AddArityError(
                         node_context, op_kind, "input(s)", 2, input_count);
@@ -223,7 +280,6 @@ private:
                         node_context, op_kind, "output(s)", 1, output_count);
                 }
                 break;
-            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kUnknown:
                 break;
         }
@@ -392,7 +448,35 @@ private:
                 break;
             }
 
-            case tc::frontend::OpKind::kConv:
+            case tc::frontend::OpKind::kConv: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+
+                tc::frontend::DataT input_dtype;
+                tc::frontend::DataT weight_dtype;
+                const bool input_ok = ResolveInputDtype(
+                    node, node_context, 0, tensor_dtypes, input_dtype);
+                const bool weight_ok = ResolveInputDtype(
+                    node, node_context, 1, tensor_dtypes, weight_dtype);
+                if (!input_ok || !weight_ok) {
+                    return;
+                }
+
+                if (input_dtype.id != tc::frontend::DataID::FLOAT ||
+                    weight_dtype.id != tc::frontend::DataID::FLOAT) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' input dtypes mismatch: " +
+                                      DtypeName(input_dtype) + " vs " +
+                                      DtypeName(weight_dtype));
+                    return;
+                }
+
+                inferred_output_dtype = input_dtype;
+                has_inferred_output_dtype = true;
+                break;
+            }
+
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -676,7 +760,129 @@ private:
                 return;
             }
 
-            case tc::frontend::OpKind::kConv:
+            case tc::frontend::OpKind::kConv: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+
+                std::vector<int64_t> input_shape;
+                std::vector<int64_t> weight_shape;
+                if (!ResolveBinaryInputShapes(node,
+                                              node_context,
+                                              tensor_shapes,
+                                              input_shape,
+                                              weight_shape)) {
+                    return;
+                }
+
+                if (input_shape.size() != 4) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' input rank must be 4");
+                    return;
+                }
+                if (weight_shape.size() != 4) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' weight rank must be 4");
+                    return;
+                }
+
+                std::vector<int64_t> kernel_shape;
+                std::vector<int64_t> strides;
+                std::vector<int64_t> pads;
+                std::vector<int64_t> dilations;
+                std::vector<int64_t> group;
+                const bool attrs_ok =
+                    ReadRequiredIntAttr(node,
+                                        node_context,
+                                        "kernel_shape",
+                                        2,
+                                        report_,
+                                        kernel_shape) &&
+                    ReadRequiredIntAttr(
+                        node, node_context, "strides", 2, report_, strides) &&
+                    ReadRequiredIntAttr(
+                        node, node_context, "pads", 4, report_, pads) &&
+                    ReadRequiredIntAttr(node,
+                                        node_context,
+                                        "dilations",
+                                        2,
+                                        report_,
+                                        dilations) &&
+                    ReadRequiredIntAttr(
+                        node, node_context, "group", 1, report_, group);
+                if (!attrs_ok) {
+                    return;
+                }
+
+                if (!AllPositive(kernel_shape) || !AllPositive(strides) ||
+                    !AllPositive(dilations)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' kernel_shape, strides, and "
+                                      "dilations must be positive");
+                    return;
+                }
+                if (!AllNonNegative(pads)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' pads must be non-negative");
+                    return;
+                }
+                if (group[0] != 1) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' group must be 1");
+                    return;
+                }
+                if (kernel_shape[0] != weight_shape[2] ||
+                    kernel_shape[1] != weight_shape[3]) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' kernel_shape mismatch");
+                    return;
+                }
+                if (input_shape[1] != -1 && weight_shape[1] != -1 &&
+                    input_shape[1] != weight_shape[1]) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' channel mismatch");
+                    return;
+                }
+
+                if (input_shape[2] == -1 || input_shape[3] == -1) {
+                    return;
+                }
+
+                const int64_t out_h =
+                    (input_shape[2] + pads[0] + pads[2] -
+                     dilations[0] * (kernel_shape[0] - 1) - 1) /
+                        strides[0] +
+                    1;
+                const int64_t out_w =
+                    (input_shape[3] + pads[1] + pads[3] -
+                     dilations[1] * (kernel_shape[1] - 1) - 1) /
+                        strides[1] +
+                    1;
+                if (out_h <= 0 || out_w <= 0) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Conv' non-positive output shape");
+                    return;
+                }
+
+                const std::vector<int64_t> inferred_shape{
+                    input_shape[0], weight_shape[0], out_h, out_w
+                };
+                for (const std::string& output_name : node.get_outputs()) {
+                    const auto* output_shape =
+                        FindTensorShape(tensor_shapes, output_name);
+                    if (output_shape && output_shape->size() != 4) {
+                        report_.add_error("ERROR: " + node_context +
+                                          " op 'Conv' output rank must be 4");
+                        return;
+                    }
+                }
+                ValidateDeclaredOutputShapes(
+                    node, node_context, "Conv", inferred_shape, tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -842,11 +1048,13 @@ private:
             }
 
             switch (op_kind) {
+                case tc::frontend::OpKind::kConv:
+                    break;
+
                 case tc::frontend::OpKind::kRelu:
                 case tc::frontend::OpKind::kAdd:
                 case tc::frontend::OpKind::kMul:
                 case tc::frontend::OpKind::kMatMul:
-                case tc::frontend::OpKind::kConv:
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +
                         std::string(tc::frontend::ToString(op_kind)) +

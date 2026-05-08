@@ -114,6 +114,15 @@ std::unique_ptr<tc::frontend::Attribute> MakeFloatsAttr(
     return attr;
 }
 
+std::unique_ptr<tc::frontend::Attribute> MakeStringAttr(std::string name,
+                                                        std::string value)
+{
+    auto attr = std::make_unique<tc::frontend::Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<std::string>({ std::move(value) });
+    return attr;
+}
+
 std::unique_ptr<tc::frontend::Initializers> MakeInitializer(
     std::string name,
     std::vector<int64_t> shape,
@@ -124,6 +133,65 @@ std::unique_ptr<tc::frontend::Initializers> MakeInitializer(
     init->set_shape(std::move(shape));
     init->set_data_type(dtype);
     return init;
+}
+
+tc::frontend::Node::AttrVecT MakeConvAttrs(
+    std::vector<int64_t> kernel_shape = { 2, 2 },
+    std::vector<int64_t> strides = { 1, 1 },
+    std::vector<int64_t> pads = { 0, 0, 0, 0 },
+    std::vector<int64_t> dilations = { 1, 1 },
+    int64_t group = 1,
+    std::string auto_pad = "NOTSET")
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("kernel_shape", std::move(kernel_shape)));
+    attrs.push_back(MakeIntsAttr("strides", std::move(strides)));
+    attrs.push_back(MakeIntsAttr("pads", std::move(pads)));
+    attrs.push_back(MakeIntsAttr("dilations", std::move(dilations)));
+    attrs.push_back(MakeIntsAttr("group", { group }));
+    attrs.push_back(MakeStringAttr("auto_pad", std::move(auto_pad)));
+    return attrs;
+}
+
+tc::frontend::Graph MakeConvGraph(
+    tc::frontend::Node::AttrVecT attrs,
+    std::unordered_map<std::string, tc::frontend::DataT> tensor_types = {},
+    std::unordered_map<std::string, std::vector<int64_t>> tensor_shapes = {})
+{
+    if (tensor_shapes.empty()) {
+        tensor_shapes = {
+            { "x", { 1, 2, 8, 8 } },
+            { "w", { 2, 2, 2, 2 } },
+            { "y", { 1, 2, 7, 7 } },
+        };
+    }
+    if (tensor_types.empty()) {
+        tensor_types = {
+            { "x", tc::frontend::TypeInfo<float>::type },
+            { "w", tc::frontend::TypeInfo<float>::type },
+            { "y", tc::frontend::TypeInfo<float>::type },
+        };
+    }
+
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kConv,
+                                     "Conv",
+                                     { "x", "w" },
+                                     { "y" },
+                                     std::move(attrs),
+                                     tensor_types,
+                                     tensor_shapes);
+
+    tc::frontend::Graph::InitVecT inits;
+    auto weight =
+        MakeInitializer("w", tensor_shapes.at("w"), tensor_types.at("w"));
+    if (tensor_types.at("w").id == tc::frontend::DataID::FLOAT) {
+        weight->set_values<float>(std::vector<float>(16, 1.0f));
+    } else if (tensor_types.at("w").id == tc::frontend::DataID::INT32) {
+        weight->set_values<int32_t>(std::vector<int32_t>(16, 1));
+    }
+    inits.push_back(std::move(weight));
+    graph.set_inits(std::move(inits));
+    return graph;
 }
 
 TEST(GraphVerifierSemantic, ValidReluGraphPasses)
@@ -628,6 +696,167 @@ TEST(GraphVerifierSemantic, TransposeWithPermRankMismatchFails)
     EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
     EXPECT_TRUE(HasDiagnosticContaining(report, "perm rank mismatch"))
         << "missing transpose perm rank mismatch diagnostic";
+}
+
+TEST(GraphVerifierSemantic, ValidConvGraphPasses)
+{
+    auto graph = MakeConvGraph(MakeConvAttrs());
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvInputRankMismatchFails)
+{
+    auto graph = MakeConvGraph(MakeConvAttrs(),
+                               {},
+                               {
+                                   { "x", { 1, 2, 8 } },
+                                   { "w", { 2, 2, 2, 2 } },
+                                   { "y", { 1, 2, 7, 7 } },
+                               });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input rank"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvWeightRankMismatchFails)
+{
+    auto graph = MakeConvGraph(MakeConvAttrs(),
+                               {},
+                               {
+                                   { "x", { 1, 2, 8, 8 } },
+                                   { "w", { 2, 2, 2 } },
+                                   { "y", { 1, 2, 7, 7 } },
+                               });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "weight rank"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvOutputRankMismatchFails)
+{
+    auto graph = MakeConvGraph(MakeConvAttrs(),
+                               {},
+                               {
+                                   { "x", { 1, 2, 8, 8 } },
+                                   { "w", { 2, 2, 2, 2 } },
+                                   { "y", { 1, 2, 7 } },
+                               });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "output rank"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvDtypeMismatchFails)
+{
+    auto graph =
+        MakeConvGraph(MakeConvAttrs(),
+                      {
+                          { "x", tc::frontend::TypeInfo<float>::type },
+                          { "w", tc::frontend::TypeInfo<int32_t>::type },
+                          { "y", tc::frontend::TypeInfo<float>::type },
+                      });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input dtypes mismatch"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvChannelMismatchFails)
+{
+    auto graph = MakeConvGraph(MakeConvAttrs(),
+                               {},
+                               {
+                                   { "x", { 1, 3, 8, 8 } },
+                                   { "w", { 2, 2, 2, 2 } },
+                                   { "y", { 1, 2, 7, 7 } },
+                               });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "channel mismatch"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvRejectsGroupNotOne)
+{
+    auto graph = MakeConvGraph(
+        MakeConvAttrs({ 2, 2 }, { 1, 1 }, { 0, 0, 0, 0 }, { 1, 1 }, 2));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "group must be 1"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvRejectsInvalidPadsLength)
+{
+    auto graph =
+        MakeConvGraph(MakeConvAttrs({ 2, 2 }, { 1, 1 }, { 0, 0 }, { 1, 1 }));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "pads"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvRejectsInvalidStridesLength)
+{
+    auto graph =
+        MakeConvGraph(MakeConvAttrs({ 2, 2 }, { 1 }, { 0, 0, 0, 0 }, { 1, 1 }));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "strides"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvRejectsInvalidDilationsLength)
+{
+    auto graph =
+        MakeConvGraph(MakeConvAttrs({ 2, 2 }, { 1, 1 }, { 0, 0, 0, 0 }, { 1 }));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "dilations"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvKernelShapeMismatchFails)
+{
+    auto graph =
+        MakeConvGraph(MakeConvAttrs({ 3, 3 }, { 1, 1 }, { 0, 0, 0, 0 }));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "kernel_shape mismatch"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvNonPositiveOutputShapeFails)
+{
+    auto graph = MakeConvGraph(
+        MakeConvAttrs({ 2, 2 }, { 1, 1 }, { 0, 0, 0, 0 }, { 1, 1 }),
+        {},
+        {
+            { "x", { 1, 2, 1, 1 } },
+            { "w", { 2, 2, 2, 2 } },
+            { "y", { 1, 2, 0, 0 } },
+        });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "non-positive output shape"))
+        << DiagnosticsAsString(report);
 }
 
 } // namespace
