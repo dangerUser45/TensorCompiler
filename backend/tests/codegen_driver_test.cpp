@@ -92,5 +92,23 @@ int main()
         return 1;
     }
 
+    std::string asm_text;
+    if (!Expect(tc::backend::EmitAsmFromMlirText(kExecConvReluMlir,
+                                                 "exec_conv_relu.mlir",
+                                                 {},
+                                                 {},
+                                                 asm_text,
+                                                 diagnostic),
+                "exec Conv Relu MLIR must emit assembly")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(asm_text.find("tc_model") != std::string::npos,
+                "assembly must contain tc_model symbol")) {
+        std::cerr << asm_text << '\n';
+        return 1;
+    }
+
     return 0;
 }

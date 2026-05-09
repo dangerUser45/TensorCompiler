@@ -3,6 +3,7 @@
 #include "frontend_mlir.hpp"
 
 #include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -14,6 +15,53 @@
 #include <llvm/TargetParser/Host.h>
 
 namespace {
+
+std::string ShellQuote(const std::filesystem::path& path)
+{
+    std::string quoted = "'";
+    for (const char c : path.string()) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+std::filesystem::path MakeTempPath(const std::string& stem,
+                                   const std::string& extension)
+{
+    const auto tick = std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count();
+    return std::filesystem::temp_directory_path() /
+           (stem + "_" + std::to_string(tick) + extension);
+}
+
+bool ReadFileToString(const std::filesystem::path& path, std::string& out_text)
+{
+    std::ifstream in(path, std::ios::in | std::ios::binary);
+    if (!in.is_open()) {
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    out_text = buffer.str();
+    return true;
+}
+
+bool WriteStringToFile(const std::filesystem::path& path,
+                       const std::string& text)
+{
+    std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    out << text;
+    return out.good();
+}
 
 struct TensorStorage final
 {
@@ -572,14 +620,55 @@ bool EmitAsmFromMlirText(const std::string& mlir_text,
                          std::string& out_asm,
                          BackendDiagnostic& out_diagnostic)
 {
-    (void)mlir_text;
-    (void)source_name;
-    (void)pass_pipeline;
-    (void)target_triple;
     out_asm.clear();
-    out_diagnostic.stage = "asm-emission";
-    out_diagnostic.message = "ASM emission is not implemented yet";
-    return false;
+
+    std::string llvm_ir;
+    if (!EmitLlvmIrFromMlirText(mlir_text,
+                                source_name,
+                                pass_pipeline,
+                                target_triple,
+                                llvm_ir,
+                                out_diagnostic)) {
+        return false;
+    }
+
+    const std::filesystem::path ir_path = MakeTempPath("tc_backend_llvm", ".ll");
+    const std::filesystem::path asm_path = MakeTempPath("tc_backend_asm", ".s");
+    if (!WriteStringToFile(ir_path, llvm_ir)) {
+        out_diagnostic.stage = "asm-emission";
+        out_diagnostic.message = "failed to write temporary LLVM IR file";
+        return false;
+    }
+
+    std::string command = "llc -filetype=asm";
+    if (!target_triple.empty()) {
+        command += " -mtriple=" + target_triple;
+    }
+    command += " -o " + ShellQuote(asm_path) + " " + ShellQuote(ir_path);
+
+    if (std::system(command.c_str()) != 0) {
+        out_diagnostic.stage = "asm-emission";
+        out_diagnostic.message = "llc failed while emitting assembly";
+        std::error_code ec;
+        std::filesystem::remove(ir_path, ec);
+        std::filesystem::remove(asm_path, ec);
+        return false;
+    }
+
+    if (!ReadFileToString(asm_path, out_asm)) {
+        out_diagnostic.stage = "asm-emission";
+        out_diagnostic.message = "failed to read generated assembly file";
+        std::error_code ec;
+        std::filesystem::remove(ir_path, ec);
+        std::filesystem::remove(asm_path, ec);
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(ir_path, ec);
+    std::filesystem::remove(asm_path, ec);
+    out_diagnostic = BackendDiagnostic{};
+    return true;
 }
 
 } // namespace tc::backend
