@@ -12,8 +12,8 @@ int main()
         return 1;
     }
 
-    std::cout << "LLVM backend ready: "
-              << tc::backend::GetLlvmVersionString() << '\n';
+    std::cout << "LLVM backend ready: " << tc::backend::GetLlvmVersionString()
+              << '\n';
     std::cout << tc::backend::GetMlirSupportMessage() << '\n';
 
     return 0;

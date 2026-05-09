@@ -37,18 +37,21 @@ int main()
 {
     tc::backend::FrontendMlirModule module;
     tc::backend::BackendDiagnostic diagnostic;
-    if (!Expect(tc::backend::ParseFrontendMlirModule(
-                    kExecConvReluMlir, "exec_conv_relu.mlir", module, diagnostic),
-                "exec Conv Relu MLIR must parse")) {
+    if (!Expect(
+            tc::backend::ParseFrontendMlirModule(
+                kExecConvReluMlir, "exec_conv_relu.mlir", module, diagnostic),
+            "exec Conv Relu MLIR must parse")) {
         std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
         return 1;
     }
 
     if (!Expect(module.entry_name == "tc_model", "entry must be tc_model") ||
         !Expect(module.inputs.size() == 1, "module must have one input") ||
-        !Expect(module.inputs[0].type.shape == std::vector<int64_t>({ 1, 2, 8, 8 }),
+        !Expect(module.inputs[0].type.shape ==
+                    std::vector<int64_t>({ 1, 2, 8, 8 }),
                 "input shape must be parsed") ||
-        !Expect(module.output_type.shape == std::vector<int64_t>({ 1, 2, 7, 7 }),
+        !Expect(module.output_type.shape ==
+                    std::vector<int64_t>({ 1, 2, 7, 7 }),
                 "output shape must be parsed") ||
         !Expect(module.ops.size() == 10, "module operation count must match")) {
         return 1;

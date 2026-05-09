@@ -44,9 +44,8 @@ bool ExtractByteSizes(const std::string& metadata_json,
                       std::string& output_bytes)
 {
     static const std::regex kByteSizeRegex(R"("byte_size"\s*:\s*([0-9]+))");
-    std::sregex_iterator it(metadata_json.begin(),
-                            metadata_json.end(),
-                            kByteSizeRegex);
+    std::sregex_iterator it(
+        metadata_json.begin(), metadata_json.end(), kByteSizeRegex);
     const std::sregex_iterator end;
     if (it == end) {
         return false;
@@ -74,7 +73,8 @@ bool LinkExecutableWithRuntime(const std::string& model_object_path,
     if (model_object_path.empty() || metadata_json_path.empty() ||
         output_executable_path.empty()) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "model object, metadata, and executable paths are required";
+        out_diagnostic.message =
+            "model object, metadata, and executable paths are required";
         return false;
     }
 
@@ -83,22 +83,22 @@ bool LinkExecutableWithRuntime(const std::string& model_object_path,
     const std::filesystem::path executable(output_executable_path);
     if (!std::filesystem::exists(model_object)) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "model object file does not exist: " +
-                                 model_object.string();
+        out_diagnostic.message =
+            "model object file does not exist: " + model_object.string();
         return false;
     }
     if (!std::filesystem::exists(metadata)) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "metadata file does not exist: " +
-                                 metadata.string();
+        out_diagnostic.message =
+            "metadata file does not exist: " + metadata.string();
         return false;
     }
 
     std::string metadata_json;
     if (!ReadFileToString(metadata, metadata_json)) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "failed to read metadata file: " +
-                                 metadata.string();
+        out_diagnostic.message =
+            "failed to read metadata file: " + metadata.string();
         return false;
     }
 
@@ -106,7 +106,8 @@ bool LinkExecutableWithRuntime(const std::string& model_object_path,
     std::string output_bytes;
     if (!ExtractByteSizes(metadata_json, input_bytes, output_bytes)) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "metadata JSON does not contain input/output byte_size";
+        out_diagnostic.message =
+            "metadata JSON does not contain input/output byte_size";
         return false;
     }
 
@@ -126,8 +127,8 @@ bool LinkExecutableWithRuntime(const std::string& model_object_path,
         std::filesystem::path(TC_BACKEND_RUNTIME_DIR) / "tc_model_runner.cpp";
     if (!std::filesystem::exists(runtime_source)) {
         out_diagnostic.stage = "executable-link";
-        out_diagnostic.message = "runtime source does not exist: " +
-                                 runtime_source.string();
+        out_diagnostic.message =
+            "runtime source does not exist: " + runtime_source.string();
         return false;
     }
 

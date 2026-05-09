@@ -2,8 +2,8 @@
 
 #include "frontend_mlir.hpp"
 
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -33,9 +33,8 @@ std::string ShellQuote(const std::filesystem::path& path)
 std::filesystem::path MakeTempPath(const std::string& stem,
                                    const std::string& extension)
 {
-    const auto tick = std::chrono::steady_clock::now()
-                          .time_since_epoch()
-                          .count();
+    const auto tick =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
            (stem + "_" + std::to_string(tick) + extension);
 }
@@ -245,7 +244,8 @@ private:
         return storage;
     }
 
-    std::string ReadElement(const TensorStorage& storage, std::size_t linear_index)
+    std::string ReadElement(const TensorStorage& storage,
+                            std::size_t linear_index)
     {
         switch (storage.kind) {
             case TensorStorage::Kind::kConstant: {
@@ -259,7 +259,8 @@ private:
                 const std::string ptr = NextTemp();
                 const std::string value = NextTemp();
                 out_ << "  " << ptr << " = getelementptr inbounds float, ptr "
-                     << storage.pointer_name << ", i64 " << linear_index << '\n';
+                     << storage.pointer_name << ", i64 " << linear_index
+                     << '\n';
                 out_ << "  " << value << " = load float, ptr " << ptr
                      << ", align 4\n";
                 return value;
@@ -339,7 +340,8 @@ private:
         storage.constant_is_splat = op.constant_is_splat;
         if (!storage.constant_is_splat &&
             storage.constant_values.size() != storage.type.element_count()) {
-            return Fail(diagnostic, "constant element count does not match type");
+            return Fail(diagnostic,
+                        "constant element count does not match type");
         }
         values_[op.result] = std::move(storage);
         return true;
@@ -363,25 +365,28 @@ private:
         }
         const TensorStorage* input = FindValue(op.operands[0]);
         if (!input) {
-            return Fail(diagnostic, "unknown broadcast input " + op.operands[0]);
+            return Fail(diagnostic,
+                        "unknown broadcast input " + op.operands[0]);
         }
 
         TensorStorage output = CreateBuffer(op.result, op.result_type);
-        for (std::size_t out_linear = 0; out_linear < output.type.element_count();
+        for (std::size_t out_linear = 0;
+             out_linear < output.type.element_count();
              ++out_linear) {
             const std::vector<int64_t> out_coords =
                 CoordinatesFromLinear(output.type, out_linear);
             std::vector<int64_t> in_coords(input->type.shape.size(), 0);
             for (std::size_t i = 0; i < input->type.shape.size(); ++i) {
                 const int64_t out_axis =
-                    i < op.dimensions.size() ? op.dimensions[i]
-                                             : static_cast<int64_t>(
-                                                   output.type.shape.size() -
-                                                   input->type.shape.size() + i);
+                    i < op.dimensions.size()
+                        ? op.dimensions[i]
+                        : static_cast<int64_t>(output.type.shape.size() -
+                                               input->type.shape.size() + i);
                 if (out_axis >= 0 &&
                     static_cast<std::size_t>(out_axis) < out_coords.size() &&
                     input->type.shape[i] != 1) {
-                    in_coords[i] = out_coords[static_cast<std::size_t>(out_axis)];
+                    in_coords[i] =
+                        out_coords[static_cast<std::size_t>(out_axis)];
                 }
             }
             const std::size_t in_linear =
@@ -452,10 +457,12 @@ private:
                 for (std::size_t kk = 0; kk < k; ++kk) {
                     const std::string product = NextTemp();
                     const std::string sum = NextTemp();
-                    const std::string lhs_value = ReadElement(*lhs, row * k + kk);
-                    const std::string rhs_value = ReadElement(*rhs, kk * n + col);
-                    out_ << "  " << product << " = fmul float "
-                         << lhs_value << ", " << rhs_value << '\n';
+                    const std::string lhs_value =
+                        ReadElement(*lhs, row * k + kk);
+                    const std::string rhs_value =
+                        ReadElement(*rhs, kk * n + col);
+                    out_ << "  " << product << " = fmul float " << lhs_value
+                         << ", " << rhs_value << '\n';
                     out_ << "  " << sum << " = fadd float " << acc << ", "
                          << product << '\n';
                     acc = sum;
@@ -478,7 +485,8 @@ private:
         }
 
         TensorStorage output = CreateBuffer(op.result, op.result_type);
-        for (std::size_t out_linear = 0; out_linear < output.type.element_count();
+        for (std::size_t out_linear = 0;
+             out_linear < output.type.element_count();
              ++out_linear) {
             const std::vector<int64_t> out_coords =
                 CoordinatesFromLinear(output.type, out_linear);
@@ -487,11 +495,11 @@ private:
                 in_coords[static_cast<std::size_t>(op.dimensions[i])] =
                     out_coords[i];
             }
-            StoreElement(output,
-                         out_linear,
-                         ReadElement(*input,
-                                     LinearFromCoordinates(input->type,
-                                                           in_coords)));
+            StoreElement(
+                output,
+                out_linear,
+                ReadElement(*input,
+                            LinearFromCoordinates(input->type, in_coords)));
         }
         return true;
     }
@@ -505,16 +513,22 @@ private:
         const TensorStorage* input = FindValue(op.operands[0]);
         const TensorStorage* weight = FindValue(op.operands[1]);
         if (!input || !weight || input->type.shape.size() != 4 ||
-            weight->type.shape.size() != 4 || op.result_type.shape.size() != 4) {
+            weight->type.shape.size() != 4 ||
+            op.result_type.shape.size() != 4) {
             return Fail(diagnostic, "conv expects rank-4 NCHW/FCHW tensors");
         }
 
         TensorStorage output = CreateBuffer(op.result, op.result_type);
-        const std::size_t n_size = static_cast<std::size_t>(op.result_type.shape[0]);
-        const std::size_t f_size = static_cast<std::size_t>(op.result_type.shape[1]);
-        const std::size_t out_h = static_cast<std::size_t>(op.result_type.shape[2]);
-        const std::size_t out_w = static_cast<std::size_t>(op.result_type.shape[3]);
-        const std::size_t c_size = static_cast<std::size_t>(input->type.shape[1]);
+        const std::size_t n_size =
+            static_cast<std::size_t>(op.result_type.shape[0]);
+        const std::size_t f_size =
+            static_cast<std::size_t>(op.result_type.shape[1]);
+        const std::size_t out_h =
+            static_cast<std::size_t>(op.result_type.shape[2]);
+        const std::size_t out_w =
+            static_cast<std::size_t>(op.result_type.shape[3]);
+        const std::size_t c_size =
+            static_cast<std::size_t>(input->type.shape[1]);
         const std::size_t in_h = static_cast<std::size_t>(input->type.shape[2]);
         const std::size_t in_w = static_cast<std::size_t>(input->type.shape[3]);
         const std::size_t kernel_h =
@@ -547,8 +561,8 @@ private:
                                     out_ << "  " << product << " = fmul float "
                                          << input_value << ", " << weight_value
                                          << '\n';
-                                    out_ << "  " << sum << " = fadd float " << acc
-                                         << ", " << product << '\n';
+                                    out_ << "  " << sum << " = fadd float "
+                                         << acc << ", " << product << '\n';
                                     acc = sum;
                                 }
                             }
@@ -632,7 +646,8 @@ bool EmitAsmFromMlirText(const std::string& mlir_text,
         return false;
     }
 
-    const std::filesystem::path ir_path = MakeTempPath("tc_backend_llvm", ".ll");
+    const std::filesystem::path ir_path =
+        MakeTempPath("tc_backend_llvm", ".ll");
     const std::filesystem::path asm_path = MakeTempPath("tc_backend_asm", ".s");
     if (!WriteStringToFile(ir_path, llvm_ir)) {
         out_diagnostic.stage = "asm-emission";

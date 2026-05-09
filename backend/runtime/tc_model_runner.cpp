@@ -1,5 +1,4 @@
 #include <cstddef>
-#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -70,7 +69,8 @@ bool ReadExactFile(const std::string& path,
     out_values.resize(expected_bytes / sizeof(float));
     in.read(reinterpret_cast<char*>(out_values.data()),
             static_cast<std::streamsize>(expected_bytes));
-    return in.good() || in.gcount() == static_cast<std::streamsize>(expected_bytes);
+    return in.good() ||
+           in.gcount() == static_cast<std::streamsize>(expected_bytes);
 }
 
 bool WriteExactFile(const std::string& path, const std::vector<float>& values)

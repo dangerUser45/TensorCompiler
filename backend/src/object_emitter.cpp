@@ -27,9 +27,8 @@ std::string ShellQuote(const std::filesystem::path& path)
 std::filesystem::path MakeTempPath(const std::string& stem,
                                    const std::string& extension)
 {
-    const auto tick = std::chrono::steady_clock::now()
-                          .time_since_epoch()
-                          .count();
+    const auto tick =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
            (stem + "_" + std::to_string(tick) + extension);
 }
@@ -87,7 +86,8 @@ bool EmitObjectFromMlirText(const std::string& mlir_text,
         }
     }
 
-    const std::filesystem::path ir_path = MakeTempPath("tc_backend_object", ".ll");
+    const std::filesystem::path ir_path =
+        MakeTempPath("tc_backend_object", ".ll");
     if (!WriteStringToFile(ir_path, llvm_ir)) {
         out_diagnostic.stage = "object-emission";
         out_diagnostic.message = "failed to write temporary LLVM IR file";

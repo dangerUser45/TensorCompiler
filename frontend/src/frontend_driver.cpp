@@ -396,21 +396,22 @@ bool WriteTextFile(const std::string& file_path,
                    std::string_view stage)
 {
     if (!EnsureParentDirExists(file_path)) {
-        PrintStageError(stage,
-                        "ERROR: failed to create output directory for " +
-                            file_path);
+        PrintStageError(
+            stage, "ERROR: failed to create output directory for " + file_path);
         return false;
     }
 
     std::ofstream out(file_path, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
-        PrintStageError(stage, "ERROR: failed to open output file: " + file_path);
+        PrintStageError(stage,
+                        "ERROR: failed to open output file: " + file_path);
         return false;
     }
 
     out << contents;
     if (!out.good()) {
-        PrintStageError(stage, "ERROR: failed to write output file: " + file_path);
+        PrintStageError(stage,
+                        "ERROR: failed to write output file: " + file_path);
         return false;
     }
     return true;
@@ -648,9 +649,8 @@ int main(int argc, char** argv)
             if (!tc::frontend::metadata::BuildMetadataJson(
                     graph_ir, metadata_json, error)) {
                 PrintStageError("frontend",
-                                error.empty()
-                                    ? "ERROR: failed to emit metadata"
-                                    : error);
+                                error.empty() ? "ERROR: failed to emit metadata"
+                                              : error);
                 return 1;
             }
             if (!WriteTextFile(

@@ -141,7 +141,8 @@ bool ParseTensorType(std::string_view text, tc::backend::TensorType& out_type)
     return true;
 }
 
-bool ParseValueDecl(std::string_view text, tc::backend::MlirValueDecl& out_value)
+bool ParseValueDecl(std::string_view text,
+                    tc::backend::MlirValueDecl& out_value)
 {
     const std::string trimmed = Trim(text);
     const std::size_t colon = trimmed.find(':');
@@ -165,8 +166,8 @@ void SetParseError(tc::backend::BackendDiagnostic& diagnostic,
     if (!source_name.empty()) {
         diagnostic.message += " from '" + source_name + "'";
     }
-    diagnostic.message += " at line " + std::to_string(line_number) + ": " +
-                          message;
+    diagnostic.message +=
+        " at line " + std::to_string(line_number) + ": " + message;
 }
 
 bool ParseFunctionLine(const std::string& line,
@@ -181,30 +182,27 @@ bool ParseFunctionLine(const std::string& line,
     const std::size_t close_paren = line.rfind(')');
     const std::size_t arrow = line.find("->", close_paren);
     const std::size_t open_brace = line.find('{', arrow);
-    if (open_paren == std::string::npos ||
-        close_paren == std::string::npos || arrow == std::string::npos ||
-        open_brace == std::string::npos || close_paren < open_paren) {
+    if (open_paren == std::string::npos || close_paren == std::string::npos ||
+        arrow == std::string::npos || open_brace == std::string::npos ||
+        close_paren < open_paren) {
         return false;
     }
 
-    module.entry_name =
-        Trim(std::string_view(line).substr(kPrefix.size(),
-                                           open_paren - kPrefix.size()));
+    module.entry_name = Trim(std::string_view(line).substr(
+        kPrefix.size(), open_paren - kPrefix.size()));
     if (module.entry_name.empty()) {
         return false;
     }
 
-    const std::string output_type =
-        Trim(std::string_view(line).substr(arrow + 2,
-                                           open_brace - (arrow + 2)));
+    const std::string output_type = Trim(
+        std::string_view(line).substr(arrow + 2, open_brace - (arrow + 2)));
     if (!ParseTensorType(output_type, module.output_type)) {
         return false;
     }
 
     module.inputs.clear();
-    const std::string args =
-        Trim(std::string_view(line).substr(open_paren + 1,
-                                           close_paren - open_paren - 1));
+    const std::string args = Trim(std::string_view(line).substr(
+        open_paren + 1, close_paren - open_paren - 1));
     if (args.empty()) {
         return true;
     }
@@ -219,7 +217,8 @@ bool ParseFunctionLine(const std::string& line,
     return true;
 }
 
-bool ParseOperationLine(const std::string& line, tc::backend::FrontendMlirOp& op)
+bool ParseOperationLine(const std::string& line,
+                        tc::backend::FrontendMlirOp& op)
 {
     std::smatch match;
 
@@ -228,9 +227,8 @@ bool ParseOperationLine(const std::string& line, tc::backend::FrontendMlirOp& op
     if (std::regex_match(line, match, kConstantRegex)) {
         op.kind = tc::backend::FrontendMlirOpKind::kConstant;
         op.result = match[1].str();
-        if (!ParseFloatList(match[2].str(),
-                            op.constant_values,
-                            op.constant_is_splat)) {
+        if (!ParseFloatList(
+                match[2].str(), op.constant_values, op.constant_is_splat)) {
             return false;
         }
         return ParseTensorType(match[3].str(), op.result_type);
@@ -322,8 +320,9 @@ std::size_t TensorType::element_count() const noexcept
                            shape.end(),
                            std::size_t{ 1 },
                            [](std::size_t acc, int64_t dim) {
-                               return dim <= 0 ? std::size_t{ 0 }
-                                               : acc * static_cast<std::size_t>(dim);
+                               return dim <= 0
+                                          ? std::size_t{ 0 }
+                                          : acc * static_cast<std::size_t>(dim);
                            });
 }
 
@@ -405,10 +404,8 @@ bool ParseFrontendMlirModule(const std::string& source,
         return false;
     }
     if (out_module.entry_name != "tc_model") {
-        SetParseError(out_diagnostic,
-                      source_name,
-                      0,
-                      "entry function must be @tc_model");
+        SetParseError(
+            out_diagnostic, source_name, 0, "entry function must be @tc_model");
         return false;
     }
     if (!saw_return) {

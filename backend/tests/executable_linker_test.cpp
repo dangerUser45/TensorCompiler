@@ -89,7 +89,8 @@ int main()
 {
     const std::filesystem::path temp = std::filesystem::temp_directory_path();
     const std::filesystem::path object_path = temp / "tc_linker_model.o";
-    const std::filesystem::path metadata_path = temp / "tc_linker_metadata.json";
+    const std::filesystem::path metadata_path =
+        temp / "tc_linker_metadata.json";
     const std::filesystem::path executable_path = temp / "tc_linker_runner";
     const std::filesystem::path input_path = temp / "tc_linker_input.f32";
     const std::filesystem::path output_path = temp / "tc_linker_output.f32";
@@ -114,7 +115,8 @@ int main()
     }
 
     {
-        std::ofstream metadata_out(metadata_path, std::ios::out | std::ios::trunc);
+        std::ofstream metadata_out(metadata_path,
+                                   std::ios::out | std::ios::trunc);
         metadata_out << kTinyMetadata;
     }
 
@@ -145,7 +147,8 @@ int main()
     }
 
     std::vector<float> output;
-    if (!Expect(ReadFloats(output_path, output), "output file must be readable") ||
+    if (!Expect(ReadFloats(output_path, output),
+                "output file must be readable") ||
         !Expect(output.size() == 2, "output must contain two floats") ||
         !Expect(std::fabs(output[0] - 0.0F) < 1.0e-6F,
                 "Relu output[0] must be 0") ||

@@ -1,7 +1,7 @@
-#include <iostream>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 
 #include "codegen_driver.hpp"
@@ -73,8 +73,7 @@ int main()
         std::ofstream out(ir_path, std::ios::out | std::ios::trunc);
         out << llvm_ir;
     }
-    const std::string validate_cmd =
-        "llc -filetype=null " + ir_path.string();
+    const std::string validate_cmd = "llc -filetype=null " + ir_path.string();
     if (!Expect(std::system(validate_cmd.c_str()) == 0,
                 "llc must accept generated LLVM IR")) {
         std::cerr << llvm_ir << '\n';
@@ -82,12 +81,8 @@ int main()
     }
 
     std::string bad_ir;
-    if (!Expect(!tc::backend::EmitLlvmIrFromMlirText("module { }",
-                                                     "bad.mlir",
-                                                     {},
-                                                     {},
-                                                     bad_ir,
-                                                     diagnostic),
+    if (!Expect(!tc::backend::EmitLlvmIrFromMlirText(
+                    "module { }", "bad.mlir", {}, {}, bad_ir, diagnostic),
                 "invalid MLIR must fail LLVM IR emission")) {
         return 1;
     }
