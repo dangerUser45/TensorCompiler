@@ -154,3 +154,23 @@ set_tests_properties(mlir_emitter_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(model_metadata_test
+  model_metadata_test.cpp
+)
+
+target_link_libraries(model_metadata_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME model_metadata_test
+  COMMAND model_metadata_test
+)
+
+set_tests_properties(model_metadata_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

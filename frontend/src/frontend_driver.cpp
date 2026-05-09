@@ -10,6 +10,7 @@
 #include "graph_hash.hpp"
 #include "graph_verifier.hpp"
 #include "mlir_emitter.hpp"
+#include "model_metadata.hpp"
 #include "onnx.pb.h"
 #include "onnx_importer.hpp"
 
@@ -25,6 +26,10 @@
 #define TC_DEFAULT_MLIR_DIR "build/mlir"
 #endif
 
+#ifndef TC_DEFAULT_METADATA_DIR
+#define TC_DEFAULT_METADATA_DIR "build/metadata"
+#endif
+
 namespace {
 
 struct Options final
@@ -33,18 +38,21 @@ struct Options final
     std::string dump_path;
     std::string hash_path;
     std::string mlir_path;
+    std::string metadata_path;
     bool verify = false;
     bool verify_exec = false;
     bool dump_requested = false;
     bool hash_requested = false;
     bool emit_mlir_requested = false;
+    bool emit_metadata_requested = false;
 };
 
 inline std::string BuildUsage(const char* argv0)
 {
     return std::string("Usage: ") + argv0 +
            " <model.onnx> [--verify] [--verify-exec] [--dump[=<output.dot>]] "
-           "[--hash[=<output.hash>]] [--emit-mlir[=<output.mlir>]]";
+           "[--hash[=<output.hash>]] [--emit-mlir[=<output.mlir>]] "
+           "[--emit-metadata[=<output.json>]]";
 }
 
 std::string BuildPathByModelName(const std::string& input_path,
@@ -73,6 +81,7 @@ bool ParseArgs(int argc,
         { "dump", optional_argument, nullptr, 'd' },
         { "hash", optional_argument, nullptr, 'h' },
         { "emit-mlir", optional_argument, nullptr, 'm' },
+        { "emit-metadata", optional_argument, nullptr, 'M' },
         { nullptr, 0, nullptr, 0 }
     };
 
@@ -81,7 +90,7 @@ bool ParseArgs(int argc,
 
     int opt = 0;
     while ((opt = getopt_long(
-                argc, argv, "vd::h::m::", kLongOptions, nullptr)) != -1) {
+                argc, argv, "vd::h::m::M::", kLongOptions, nullptr)) != -1) {
         switch (opt) {
             case 'v':
                 out_options.verify = true;
@@ -119,6 +128,16 @@ bool ParseArgs(int argc,
                     }
                 }
                 break;
+            case 'M':
+                out_options.emit_metadata_requested = true;
+                if (optarg != nullptr) {
+                    out_options.metadata_path = optarg;
+                    if (out_options.metadata_path.empty()) {
+                        out_error = "ERROR: --emit-metadata path is empty";
+                        return false;
+                    }
+                }
+                break;
             case '?':
                 out_error = "ERROR: unknown option or missing value";
                 return false;
@@ -147,13 +166,16 @@ bool ParseArgs(int argc,
         mark_if_unresolved(out_options.hash_requested, out_options.hash_path);
         mark_if_unresolved(out_options.emit_mlir_requested,
                            out_options.mlir_path);
+        mark_if_unresolved(out_options.emit_metadata_requested,
+                           out_options.metadata_path);
 
         if (unresolved_count == 1) {
             *unresolved_output_path = argv[optind];
             ++optind;
         } else if (unresolved_count > 1) {
             out_error = "ERROR: ambiguous output path; use explicit "
-                        "--dump=, --hash= or --emit-mlir=";
+                        "--dump=, --hash=, --emit-mlir= or "
+                        "--emit-metadata=";
             return false;
         }
     }
@@ -176,6 +198,12 @@ bool ParseArgs(int argc,
     if (out_options.emit_mlir_requested && out_options.mlir_path.empty()) {
         out_options.mlir_path = BuildPathByModelName(
             out_options.input_path, TC_DEFAULT_MLIR_DIR, ".mlir");
+    }
+
+    if (out_options.emit_metadata_requested &&
+        out_options.metadata_path.empty()) {
+        out_options.metadata_path = BuildPathByModelName(
+            out_options.input_path, TC_DEFAULT_METADATA_DIR, ".json");
     }
 
     return true;
@@ -329,6 +357,41 @@ int main(int argc, char** argv)
             return 1;
         }
         std::cout << "MLIR written to: " << options.mlir_path << '\n';
+    }
+
+    if (options.emit_metadata_requested) {
+        if (!EnsureParentDirExists(options.metadata_path)) {
+            PrintStageError("frontend",
+                            "ERROR: failed to create metadata directory for " +
+                                options.metadata_path);
+            return 1;
+        }
+
+        std::string metadata_json;
+        if (!tc::frontend::metadata::BuildMetadataJson(
+                graph_ir, metadata_json, error)) {
+            PrintStageError("frontend",
+                            error.empty() ? "ERROR: failed to emit metadata"
+                                          : error);
+            return 1;
+        }
+
+        std::ofstream out(options.metadata_path,
+                          std::ios::out | std::ios::trunc);
+        if (!out.is_open()) {
+            PrintStageError("frontend",
+                            "ERROR: failed to open metadata file: " +
+                                options.metadata_path);
+            return 1;
+        }
+        out << metadata_json;
+        if (!out.good()) {
+            PrintStageError("frontend",
+                            "ERROR: failed to write metadata file: " +
+                                options.metadata_path);
+            return 1;
+        }
+        std::cout << "Metadata written to: " << options.metadata_path << '\n';
     }
 
     if ((options.verify || options.verify_exec) && !verified) {

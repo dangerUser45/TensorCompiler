@@ -233,3 +233,24 @@ set_tests_properties(verify_emit_matrix PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+add_executable(metadata_test
+  src/metadata_test.cpp
+)
+
+target_link_libraries(metadata_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME metadata
+  COMMAND metadata_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/conv_2d_nchw_fchw.onnx
+)
+
+set_tests_properties(metadata PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
