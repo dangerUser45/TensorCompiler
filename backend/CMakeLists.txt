@@ -76,22 +76,21 @@ target_link_libraries(tc_backend PRIVATE
 )
 
 if (MLIR_FOUND)
+    get_property(MLIR_DIALECT_LIBS GLOBAL PROPERTY MLIR_DIALECT_LIBS)
+    get_property(MLIR_CONVERSION_LIBS GLOBAL PROPERTY MLIR_CONVERSION_LIBS)
+    get_property(MLIR_EXTENSION_LIBS GLOBAL PROPERTY MLIR_EXTENSION_LIBS)
+
     target_link_libraries(tc_backend PRIVATE
-        MLIRArithDialect
+        ${MLIR_DIALECT_LIBS}
+        ${MLIR_CONVERSION_LIBS}
+        ${MLIR_EXTENSION_LIBS}
+        MLIRAnalysis
         MLIRAsmParser
-        MLIRControlFlowDialect
-        MLIRFuncDialect
-        MLIRIndexDialect
         MLIRIR
-        MLIRLLVMDialect
-        MLIRLinalgDialect
-        MLIRMemRefDialect
         MLIRPass
         MLIRParser
-        MLIRRegisterAllExtensions
-        MLIRRegisterAllPasses
         MLIRSupport
-        MLIRTensorDialect
+        MLIRTransforms
     )
 endif()
 

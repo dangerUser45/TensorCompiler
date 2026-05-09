@@ -8,30 +8,82 @@ on:
     branches:
       - dev
       - main
+  workflow_dispatch:
+
+env:
+  LLVM_VERSION: "21"
 
 jobs:
+  clang-format-check:
+    name: Clang-Format
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+
+    steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y \
+            bash \
+            ca-certificates \
+            git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          apt-get update
+          apt-get install -y clang-format-${LLVM_VERSION}
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files '*.cpp' '*.hpp')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No C++ source files found"
+            exit 0
+          fi
+
+          clang-format-${LLVM_VERSION} -style=file -i "${files[@]}"
+
+          if ! git diff --exit-code -- "${files[@]}"; then
+            echo "Formatting check failed. Run:"
+            echo "  clang-format -style=file -i \$(git ls-files '*.cpp' '*.hpp')"
+            exit 1
+          fi
+
   frontend-build-and-test:
     name: Frontend Build & Test (${{ matrix.build_type }})
     runs-on: ubuntu-latest
+    container: ubuntu:26.04
     strategy:
       fail-fast: false
       matrix:
         build_type: [Debug, Release]
 
     steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y \
+            bash \
+            ca-certificates \
+            git
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             cmake \
+            g++ \
             ninja-build \
             protobuf-compiler \
             libprotobuf-dev \
-            libgtest-dev \
-            clang-format
+            libgtest-dev
 
       - name: Configure
         run: |
@@ -45,82 +97,69 @@ jobs:
       - name: Test
         run: ctest --test-dir frontend/build-${{ matrix.build_type }} --output-on-failure
 
+      - name: Handoff CLI smoke
+        if: matrix.build_type == 'Release'
+        shell: bash
+        run: |
+          driver="frontend/build-${{ matrix.build_type }}/frontend_driver"
+          tmp_dir="${RUNNER_TEMP}/tc-handoff"
+          mkdir -p "${tmp_dir}"
+
+          "${driver}" frontend/models/exec_conv_relu.onnx --verify-exec
+          "${driver}" frontend/models/exec_conv_relu.onnx --emit-mlir="${tmp_dir}/exec_conv_relu.mlir"
+          "${driver}" frontend/models/exec_conv_relu.onnx --emit-metadata="${tmp_dir}/exec_conv_relu.json"
+
+          grep -q "func.func @tc_model" "${tmp_dir}/exec_conv_relu.mlir"
+          grep -q "linalg.conv_2d_nchw_fchw" "${tmp_dir}/exec_conv_relu.mlir"
+          grep -q '"model_entry": "tc_model"' "${tmp_dir}/exec_conv_relu.json"
+
   backend-build-and-test:
     name: Backend Build & Test (${{ matrix.build_type }})
     runs-on: ubuntu-latest
+    container: ubuntu:26.04
     strategy:
       fail-fast: false
       matrix:
         build_type: [Debug, Release]
 
     steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y \
+            bash \
+            ca-certificates \
+            git
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect backend project
-        id: backend_project
-        shell: bash
-        run: |
-          if [[ -f backend/CMakeLists.txt ]]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-            echo "Backend project detected"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "Backend project is absent, backend job steps will be skipped"
-          fi
-
       - name: Install dependencies
-        if: steps.backend_project.outputs.present == 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
+            clang-${LLVM_VERSION} \
             cmake \
+            g++ \
             ninja-build \
-            llvm \
-            llvm-dev
+            llvm-${LLVM_VERSION} \
+            llvm-${LLVM_VERSION}-dev \
+            libmlir-${LLVM_VERSION}-dev \
+            mlir-${LLVM_VERSION}-tools
+
+      - name: Add LLVM tools to PATH
+        run: echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Configure
-        if: steps.backend_project.outputs.present == 'true'
         run: |
           cmake -S backend -B backend/build-${{ matrix.build_type }} \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DLLVM_DIR="$(llvm-config --cmakedir)"
+            -DLLVM_DIR="/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm" \
+            -DMLIR_DIR="/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/mlir"
 
       - name: Build
-        if: steps.backend_project.outputs.present == 'true'
         run: cmake --build backend/build-${{ matrix.build_type }} --parallel
 
       - name: Test
-        if: steps.backend_project.outputs.present == 'true'
         run: ctest --test-dir backend/build-${{ matrix.build_type }} --output-on-failure
-
-  clang-format-check:
-    name: Clang-Format (PR to dev/main)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.base_ref == 'main')
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
-
-      - name: Check formatting
-        run: |
-          mapfile -t files < <(git ls-files | grep -E '^frontend/.*\.(cpp|hpp)$' || true)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No C++ source files found"
-            exit 0
-          fi
-
-          clang-format -style=file -i "${files[@]}"
-
-          if ! git diff --exit-code -- "${files[@]}"; then
-            echo "Formatting check failed. Run:"
-            echo "  clang-format -style=file -i frontend/include/*.hpp frontend/src/*.cpp frontend/tests/**/*.cpp"
-            exit 1
-          fi
