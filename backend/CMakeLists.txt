@@ -36,6 +36,7 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 
 add_library(tc_backend STATIC
     src/codegen_driver.cpp
+    src/executable_linker.cpp
     src/frontend_mlir.cpp
     src/llvm_target_init.cpp
     src/mlir_context.cpp
@@ -50,6 +51,7 @@ target_compile_options(tc_backend PRIVATE
 target_compile_definitions(tc_backend PRIVATE
     TC_BACKEND_HAS_MLIR=${TC_BACKEND_HAS_MLIR}
     TC_BACKEND_LLVM_VERSION_STRING=\"${LLVM_PACKAGE_VERSION}\"
+    TC_BACKEND_RUNTIME_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/runtime\"
 )
 
 target_include_directories(tc_backend

@@ -50,6 +50,19 @@ add_test(
   COMMAND $<TARGET_FILE:tc_backend_object_emitter_test>
 )
 
+add_executable(tc_backend_executable_linker_test
+    executable_linker_test.cpp
+)
+
+target_link_libraries(tc_backend_executable_linker_test PRIVATE
+    tc_backend
+)
+
+add_test(
+  NAME executable_linker
+  COMMAND $<TARGET_FILE:tc_backend_executable_linker_test>
+)
+
 if (TC_BACKEND_HAS_MLIR)
 add_executable(tc_backend_mlir_parse_test
     mlir_parse_test.cpp
