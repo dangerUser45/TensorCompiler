@@ -617,6 +617,26 @@ TEST(GraphVerifierSemantic, AddWithBroadcastBiasShapePasses)
         << DiagnosticsAsString(report);
 }
 
+TEST(GraphVerifierSemantic, AddWithRankOneChannelLikeShapeFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kAdd,
+                                     "Add",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 3, 4, 4 } },
+                                         { "b", { 3 } },
+                                         { "y", { 1, 3, 4, 4 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input shapes mismatch"))
+        << DiagnosticsAsString(report);
+}
+
 TEST(GraphVerifierSemantic, MulWithIncompatibleInputShapesFails)
 {
     auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMul,
@@ -653,6 +673,26 @@ TEST(GraphVerifierSemantic, MulWithBroadcastBiasShapePasses)
 
     tc::frontend::verify::Report report;
     EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MulWithRankOneChannelLikeShapeFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMul,
+                                     "Mul",
+                                     { "x", "b" },
+                                     { "y" },
+                                     {},
+                                     {},
+                                     {
+                                         { "x", { 1, 3, 4, 4 } },
+                                         { "b", { 3 } },
+                                         { "y", { 1, 3, 4, 4 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input shapes mismatch"))
         << DiagnosticsAsString(report);
 }
 

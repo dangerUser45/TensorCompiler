@@ -45,6 +45,16 @@ std::unique_ptr<tc::frontend::TensorInfo> MakeTensor(std::string name,
     return tensor;
 }
 
+std::unique_ptr<tc::frontend::Attribute> MakeIntAttr(
+    std::string name,
+    std::vector<int64_t> values)
+{
+    auto attr = std::make_unique<tc::frontend::Attribute>();
+    attr->set_name(std::move(name));
+    attr->set_values<int64_t>(std::move(values));
+    return attr;
+}
+
 tc::frontend::Graph MakeSingleAddGraph()
 {
     tc::frontend::Graph graph;
@@ -65,6 +75,44 @@ tc::frontend::Graph MakeSingleAddGraph()
     node->set_op_kind(tc::frontend::OpKind::kAdd);
     node->set_inputs({ "x", "y" });
     node->set_outputs({ "z" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
+tc::frontend::Graph MakeConvGraphForMlir(tc::frontend::Node::AttrVecT attrs)
+{
+    tc::frontend::Graph graph;
+    graph.set_name("conv_attr_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(
+        MakeTensor("x", { 1, 2, 8, 8 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(
+        MakeTensor("y", { 1, 2, 4, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    tc::frontend::Graph::InitVecT inits;
+    auto weight = std::make_unique<tc::frontend::Initializers>();
+    weight->set_name("w");
+    weight->set_shape({ 2, 2, 2, 2 });
+    weight->set_values<float>(std::vector<float>(16, 1.0f));
+    inits.push_back(std::move(weight));
+    graph.set_inits(std::move(inits));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("conv_0");
+    node->set_name_op("Conv");
+    node->set_op_kind(tc::frontend::OpKind::kConv);
+    node->set_inputs({ "x", "w" });
+    node->set_outputs({ "y" });
+    node->set_attr(std::move(attrs));
 
     tc::frontend::Graph::NodeVecT nodes;
     nodes.push_back(std::move(node));
@@ -673,6 +721,24 @@ TEST(MlirEmitter, ConvModelLowersToLinalgConvWithInitializerConstants)
         << mlir_text;
     EXPECT_NE(mlir_text.find("dimensions = [1]"), std::string::npos)
         << mlir_text;
+}
+
+TEST(MlirEmitter, ConvWithNonDefaultAttrsFailsProductionEmission)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntAttr("kernel_shape", { 2, 2 }));
+    attrs.push_back(MakeIntAttr("strides", { 2, 2 }));
+    attrs.push_back(MakeIntAttr("pads", { 1, 1, 1, 1 }));
+    attrs.push_back(MakeIntAttr("dilations", { 1, 1 }));
+    attrs.push_back(MakeIntAttr("group", { 1 }));
+    auto graph = MakeConvGraphForMlir(std::move(attrs));
+
+    std::string mlir_text;
+    std::string error;
+    EXPECT_FALSE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error));
+    EXPECT_TRUE(mlir_text.empty()) << mlir_text;
+    EXPECT_NE(error.find("unsupported Conv attributes"), std::string::npos)
+        << error;
 }
 
 TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
