@@ -67,8 +67,11 @@ if (MLIR_FOUND)
     )
 endif()
 
-target_link_libraries(tc_backend PRIVATE
+target_link_libraries(tc_backend PUBLIC
     LLVM
+)
+
+target_link_libraries(tc_backend PRIVATE
     project_warnings
 )
 
