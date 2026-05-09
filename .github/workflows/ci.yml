@@ -79,6 +79,7 @@ jobs:
           apt-get update
           apt-get install -y \
             cmake \
+            g++ \
             ninja-build \
             protobuf-compiler \
             libprotobuf-dev \
@@ -139,6 +140,7 @@ jobs:
           apt-get install -y \
             clang-${LLVM_VERSION} \
             cmake \
+            g++ \
             ninja-build \
             llvm-${LLVM_VERSION} \
             llvm-${LLVM_VERSION}-dev \
