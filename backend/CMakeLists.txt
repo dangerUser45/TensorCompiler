@@ -40,6 +40,7 @@ add_library(tc_backend STATIC
     src/llvm_target_init.cpp
     src/mlir_context.cpp
     src/mlir_pipeline.cpp
+    src/object_emitter.cpp
 )
 
 target_compile_options(tc_backend PRIVATE

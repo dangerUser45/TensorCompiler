@@ -37,6 +37,19 @@ add_test(
   COMMAND $<TARGET_FILE:tc_backend_codegen_driver_test>
 )
 
+add_executable(tc_backend_object_emitter_test
+    object_emitter_test.cpp
+)
+
+target_link_libraries(tc_backend_object_emitter_test PRIVATE
+    tc_backend
+)
+
+add_test(
+  NAME object_emitter
+  COMMAND $<TARGET_FILE:tc_backend_object_emitter_test>
+)
+
 if (TC_BACKEND_HAS_MLIR)
 add_executable(tc_backend_mlir_parse_test
     mlir_parse_test.cpp
