@@ -88,8 +88,6 @@ if (MLIR_FOUND)
         MLIRMemRefDialect
         MLIRPass
         MLIRParser
-        MLIRRegisterAllExtensions
-        MLIRRegisterAllPasses
         MLIRSupport
         MLIRTensorDialect
     )
