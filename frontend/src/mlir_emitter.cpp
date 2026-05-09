@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -193,6 +194,7 @@ bool IsBroadcastCompatibleDim(std::string_view in_dim,
 
 bool BuildBroadcastDimensions(std::string_view input_type,
                               std::string_view output_type,
+                              bool allow_channel_rank1,
                               std::string& out_dimensions)
 {
     std::vector<std::string> input_dims;
@@ -204,7 +206,8 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     if (input_dims.size() > output_dims.size()) {
         return false;
     }
-    if (input_dims.size() == 1 && output_dims.size() >= 2 &&
+    if (allow_channel_rank1 && input_dims.size() == 1 &&
+        output_dims.size() >= 2 &&
         IsBroadcastCompatibleDim(input_dims[0], output_dims[1])) {
         out_dimensions = "1";
         return true;
@@ -229,6 +232,19 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     }
     out_dimensions = dims.str();
     return true;
+}
+
+bool EndsWith(std::string_view text, std::string_view suffix) noexcept
+{
+    return text.size() >= suffix.size() &&
+           text.compare(text.size() - suffix.size(), suffix.size(), suffix) ==
+               0;
+}
+
+bool IsSyntheticBiasAdd(const tc::frontend::Node& node) noexcept
+{
+    return node.get_op_kind() == tc::frontend::OpKind::kAdd &&
+           EndsWith(node.get_name_node(), ".add");
 }
 
 std::string FormatFloatLiteral(float value)
@@ -275,6 +291,33 @@ std::string EmitFloatInitializerConstant(std::ostream& out,
         << BuildDenseFloatLiteral(init.get_values<float>()) << " : "
         << init_type << '\n';
     return const_name;
+}
+
+const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
+                                        std::string_view name)
+{
+    for (const auto& attr : node.get_attrs()) {
+        if (attr && attr->get_name() == name) {
+            return attr.get();
+        }
+    }
+    return nullptr;
+}
+
+bool IntAttrEquals(const tc::frontend::Node& node,
+                   std::string_view name,
+                   const std::vector<int64_t>& expected)
+{
+    const auto* attr = FindAttr(node, name);
+    return attr && attr->get_data_type().id == tc::frontend::DataID::INT64 &&
+           attr->get_values<int64_t>() == expected;
+}
+
+bool ConvAttrsSupportedForPlainLinalg(const tc::frontend::Node& node)
+{
+    return IntAttrEquals(node, "strides", { 1, 1 }) &&
+           IntAttrEquals(node, "pads", { 0, 0, 0, 0 }) &&
+           IntAttrEquals(node, "dilations", { 1, 1 });
 }
 
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
@@ -431,13 +474,15 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         return std::string("0");
     };
     auto MaterializeToType = [&out, &NextTemp](const MlirValue& value,
-                                               const std::string& target_type) {
+                                               const std::string& target_type,
+                                               bool allow_channel_rank1) {
         if (value.type == target_type) {
             return value;
         }
 
         std::string dimensions;
-        if (BuildBroadcastDimensions(value.type, target_type, dimensions)) {
+        if (BuildBroadcastDimensions(
+                value.type, target_type, allow_channel_rank1, dimensions)) {
             const std::string init = NextTemp();
             out << "    " << init << " = tensor.empty() : " << target_type
                 << '\n';
@@ -494,9 +539,10 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
                 const std::string result_type =
                     ResolveTensorType(output_name, lhs.type);
+                const bool allow_channel_bias = IsSyntheticBiasAdd(node);
 
-                lhs = MaterializeToType(lhs, result_type);
-                rhs = MaterializeToType(rhs, result_type);
+                lhs = MaterializeToType(lhs, result_type, allow_channel_bias);
+                rhs = MaterializeToType(rhs, result_type, allow_channel_bias);
 
                 result = MlirValue{ NextTemp(), result_type };
                 out << "    " << result->name << " = arith.addf " << lhs.name
@@ -510,8 +556,8 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 const std::string result_type =
                     ResolveTensorType(output_name, lhs.type);
 
-                lhs = MaterializeToType(lhs, result_type);
-                rhs = MaterializeToType(rhs, result_type);
+                lhs = MaterializeToType(lhs, result_type, false);
+                rhs = MaterializeToType(rhs, result_type, false);
 
                 result = MlirValue{ NextTemp(), result_type };
                 out << "    " << result->name << " = arith.mulf " << lhs.name
@@ -551,6 +597,13 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             }
 
             case tc::frontend::OpKind::kConv: {
+                if (!ConvAttrsSupportedForPlainLinalg(node)) {
+                    out_error =
+                        "ERROR: unsupported Conv attributes for production "
+                        "MLIR; only pads=[0,0,0,0], strides=[1,1], and "
+                        "dilations=[1,1] are currently supported";
+                    return false;
+                }
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
                 const MlirValue weight =
                     ResolveInputValue(node.get_inputs()[1]);

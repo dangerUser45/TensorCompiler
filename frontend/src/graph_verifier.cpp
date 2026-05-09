@@ -106,17 +106,6 @@ bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
                            const std::vector<int64_t>& rhs_shape,
                            std::vector<int64_t>& out_shape)
 {
-    if (lhs_shape.size() >= 2 && rhs_shape.size() == 1 &&
-        BroadcastDimsCompatible(lhs_shape[1], rhs_shape[0])) {
-        out_shape = lhs_shape;
-        return true;
-    }
-    if (rhs_shape.size() >= 2 && lhs_shape.size() == 1 &&
-        BroadcastDimsCompatible(rhs_shape[1], lhs_shape[0])) {
-        out_shape = rhs_shape;
-        return true;
-    }
-
     const std::size_t rank = std::max(lhs_shape.size(), rhs_shape.size());
     out_shape.assign(rank, -1);
 
@@ -135,6 +124,36 @@ bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
     }
 
     return true;
+}
+
+bool EndsWith(std::string_view text, std::string_view suffix) noexcept
+{
+    return text.size() >= suffix.size() &&
+           text.compare(text.size() - suffix.size(), suffix.size(), suffix) ==
+               0;
+}
+
+bool IsSyntheticBiasAdd(const tc::frontend::Node& node) noexcept
+{
+    return node.get_op_kind() == tc::frontend::OpKind::kAdd &&
+           EndsWith(node.get_name_node(), ".add");
+}
+
+bool ComputeChannelBiasBroadcastShape(const std::vector<int64_t>& lhs_shape,
+                                      const std::vector<int64_t>& rhs_shape,
+                                      std::vector<int64_t>& out_shape)
+{
+    if (lhs_shape.size() == 4 && rhs_shape.size() == 1 &&
+        BroadcastDimsCompatible(lhs_shape[1], rhs_shape[0])) {
+        out_shape = lhs_shape;
+        return true;
+    }
+    if (lhs_shape.size() == 1 && rhs_shape.size() == 4 &&
+        BroadcastDimsCompatible(lhs_shape[0], rhs_shape[1])) {
+        out_shape = rhs_shape;
+        return true;
+    }
+    return false;
 }
 
 const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
@@ -630,7 +649,10 @@ private:
 
                 std::vector<int64_t> inferred_shape;
                 if (!ComputeBroadcastShape(
-                        lhs_shape, rhs_shape, inferred_shape)) {
+                        lhs_shape, rhs_shape, inferred_shape) &&
+                    (!IsSyntheticBiasAdd(node) ||
+                     !ComputeChannelBiasBroadcastShape(
+                         lhs_shape, rhs_shape, inferred_shape))) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Add' input shapes mismatch");
                     return;
