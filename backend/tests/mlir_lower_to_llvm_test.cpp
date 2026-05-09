@@ -35,9 +35,10 @@ int main()
 
     tc::backend::ParsedMlirModule pipeline_module;
     tc::backend::BackendDiagnostic diagnostic;
-    if (!Expect(tc::backend::ParseMlirModuleFromString(
-                    kScalarAddModule, "scalar_add.mlir", pipeline_module,
-                    diagnostic),
+    if (!Expect(tc::backend::ParseMlirModuleFromString(kScalarAddModule,
+                                                       "scalar_add.mlir",
+                                                       pipeline_module,
+                                                       diagnostic),
                 "scalar add MLIR must parse successfully")) {
         std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
         return 1;
@@ -58,17 +59,17 @@ int main()
     }
 
     tc::backend::ParsedMlirModule llvm_module;
-    if (!Expect(tc::backend::ParseMlirModuleFromString(
-                    kScalarAddModule, "scalar_add.mlir", llvm_module,
-                    diagnostic),
-                "scalar add MLIR must reparse before LLVM lowering")) {
+    if (!Expect(
+            tc::backend::ParseMlirModuleFromString(
+                kScalarAddModule, "scalar_add.mlir", llvm_module, diagnostic),
+            "scalar add MLIR must reparse before LLVM lowering")) {
         std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
         return 1;
     }
 
-    if (!Expect(tc::backend::LowerMlirModuleToLlvmDialect(
-                    llvm_module, diagnostic),
-                "lowering MLIR module to LLVM dialect must succeed")) {
+    if (!Expect(
+            tc::backend::LowerMlirModuleToLlvmDialect(llvm_module, diagnostic),
+            "lowering MLIR module to LLVM dialect must succeed")) {
         std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
         return 1;
     }

@@ -44,10 +44,10 @@ int main()
 
     tc::backend::ParsedMlirModule parsed_module;
     tc::backend::BackendDiagnostic diagnostic;
-    if (!Expect(tc::backend::ParseMlirModuleFromString(
-                    kValidModule, "valid_identity.mlir", parsed_module,
-                    diagnostic),
-                "valid MLIR module should parse successfully")) {
+    if (!Expect(
+            tc::backend::ParseMlirModuleFromString(
+                kValidModule, "valid_identity.mlir", parsed_module, diagnostic),
+            "valid MLIR module should parse successfully")) {
         std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
         return 1;
     }
@@ -63,9 +63,10 @@ int main()
 
     parsed_module.clear();
     diagnostic = tc::backend::BackendDiagnostic{};
-    if (!Expect(!tc::backend::ParseMlirModuleFromString(
-                    kInvalidModule, "invalid_identity.mlir", parsed_module,
-                    diagnostic),
+    if (!Expect(!tc::backend::ParseMlirModuleFromString(kInvalidModule,
+                                                        "invalid_identity.mlir",
+                                                        parsed_module,
+                                                        diagnostic),
                 "invalid MLIR module must fail to parse")) {
         return 1;
     }

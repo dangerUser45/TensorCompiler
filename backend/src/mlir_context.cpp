@@ -2,17 +2,17 @@
 
 #if TC_BACKEND_HAS_MLIR
 #include <mlir/Conversion/ConvertToLLVM/ToLLVMPass.h>
-#include <mlir/InitAllExtensions.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlowOps.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/Index/IR/IndexDialect.h>
-#include <mlir/Dialect/Linalg/IR/Linalg.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
+#include <mlir/Dialect/Linalg/IR/Linalg.h>
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
+#include <mlir/Dialect/Tensor/IR/Tensor.h>
 #include <mlir/IR/DialectRegistry.h>
 #include <mlir/IR/MLIRContext.h>
-#include <mlir/Dialect/Tensor/IR/Tensor.h>
+#include <mlir/InitAllExtensions.h>
 #endif
 
 namespace tc::backend {
@@ -60,14 +60,7 @@ std::vector<std::string> GetRequiredMlirDialects()
     }
 
     return {
-        "func",
-        "arith",
-        "cf",
-        "index",
-        "tensor",
-        "linalg",
-        "memref",
-        "llvm",
+        "func", "arith", "cf", "index", "tensor", "linalg", "memref", "llvm",
     };
 }
 
@@ -95,7 +88,8 @@ std::string GetMlirSupportMessage()
         return "MLIR support is enabled";
     }
 
-    return "MLIR support is disabled: MLIR package was not found at configure time";
+    return "MLIR support is disabled: MLIR package was not found at configure "
+           "time";
 }
 
 } // namespace tc::backend

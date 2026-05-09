@@ -6,7 +6,7 @@ if (NOT TARGET GTest::gtest_main)
   if (EXISTS "${LOCAL_GTEST_ROOT}/CMakeLists.txt")
     add_subdirectory(
       "${LOCAL_GTEST_ROOT}"
-      "${CMAKE_BINARY_DIR}/_deps/local-googletest-unit"
+      "${PROJECT_BINARY_DIR}/_deps/local-googletest-unit"
       EXCLUDE_FROM_ALL
     )
   endif()
@@ -25,7 +25,7 @@ add_executable(op_kind_test
 )
 
 target_include_directories(op_kind_test PRIVATE
-  ${CMAKE_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include
 )
 
 target_link_libraries(op_kind_test PRIVATE
@@ -40,7 +40,7 @@ add_test(
 
 set_tests_properties(op_kind_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(importer_op_kind_test
@@ -54,7 +54,7 @@ target_link_libraries(importer_op_kind_test PRIVATE
 )
 
 target_compile_definitions(importer_op_kind_test PRIVATE
-  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+  TC_TEST_MODELS_DIR=\"${PROJECT_SOURCE_DIR}/models\"
 )
 
 add_test(
@@ -64,7 +64,7 @@ add_test(
 
 set_tests_properties(importer_op_kind_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(graph_verifier_semantic_test
@@ -84,7 +84,7 @@ add_test(
 
 set_tests_properties(graph_verifier_semantic_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(importer_tensor_contract_test
@@ -98,7 +98,7 @@ target_link_libraries(importer_tensor_contract_test PRIVATE
 )
 
 target_compile_definitions(importer_tensor_contract_test PRIVATE
-  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+  TC_TEST_MODELS_DIR=\"${PROJECT_SOURCE_DIR}/models\"
 )
 
 add_test(
@@ -108,7 +108,7 @@ add_test(
 
 set_tests_properties(importer_tensor_contract_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(importer_attr_normalization_test
@@ -128,7 +128,7 @@ add_test(
 
 set_tests_properties(importer_attr_normalization_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(mlir_emitter_test
@@ -142,7 +142,7 @@ target_link_libraries(mlir_emitter_test PRIVATE
 )
 
 target_compile_definitions(mlir_emitter_test PRIVATE
-  TC_TEST_MODELS_DIR=\"${CMAKE_SOURCE_DIR}/models\"
+  TC_TEST_MODELS_DIR=\"${PROJECT_SOURCE_DIR}/models\"
 )
 
 add_test(
@@ -152,7 +152,7 @@ add_test(
 
 set_tests_properties(mlir_emitter_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
 add_executable(model_metadata_test
@@ -172,5 +172,5 @@ add_test(
 
 set_tests_properties(model_metadata_test PROPERTIES
   LABELS "unit"
-  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )

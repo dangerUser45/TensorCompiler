@@ -52,10 +52,12 @@ add_library(tc_frontend_onnx STATIC
     ${PROTO_SRCS}
 )
 
-add_library(project_warnings INTERFACE)
-target_compile_options(project_warnings INTERFACE
-  $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
-)
+if (NOT TARGET project_warnings)
+    add_library(project_warnings INTERFACE)
+    target_compile_options(project_warnings INTERFACE
+      $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
+    )
+endif()
 
 target_include_directories(tc_frontend_onnx PUBLIC
     include
@@ -79,6 +81,21 @@ target_link_libraries(frontend_driver PRIVATE
     tc_frontend_onnx
     project_warnings
 )
+
+if (TARGET tc_backend)
+    target_link_libraries(frontend_driver PRIVATE tc_backend)
+    target_compile_definitions(frontend_driver PRIVATE
+        TC_FRONTEND_HAS_BACKEND=1
+        TC_DEFAULT_LLVM_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/llvm\"
+        TC_DEFAULT_ASM_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/asm\"
+        TC_DEFAULT_OBJECT_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/object\"
+        TC_DEFAULT_EXE_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/bin\"
+    )
+else()
+    target_compile_definitions(frontend_driver PRIVATE
+        TC_FRONTEND_HAS_BACKEND=0
+    )
+endif()
 
 enable_testing()
 add_subdirectory(tests)

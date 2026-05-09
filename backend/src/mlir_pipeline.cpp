@@ -7,12 +7,12 @@
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/raw_ostream.h>
-#include <mlir/InitAllPasses.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/Diagnostics.h>
+#include <mlir/InitAllPasses.h>
+#include <mlir/Parser/Parser.h>
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Pass/PassRegistry.h>
-#include <mlir/Parser/Parser.h>
 #endif
 
 namespace tc::backend {
@@ -125,9 +125,8 @@ bool ParseMlirModuleFromString(const std::string& source,
         source, parser_config, effective_source_name);
 
     if (!impl->module) {
-        out_diagnostic.message =
-            "failed to parse MLIR module from '" +
-            effective_source_name.str() + "'";
+        out_diagnostic.message = "failed to parse MLIR module from '" +
+                                 effective_source_name.str() + "'";
         if (!captured_diagnostics.empty()) {
             out_diagnostic.message += '\n' + captured_diagnostics;
         }
@@ -158,7 +157,8 @@ bool RunMlirPassPipeline(ParsedMlirModule& module,
 #if TC_BACKEND_HAS_MLIR
     if (module.empty()) {
         out_diagnostic.stage = "mlir-pass-pipeline";
-        out_diagnostic.message = "cannot run pass pipeline on an empty MLIR module";
+        out_diagnostic.message =
+            "cannot run pass pipeline on an empty MLIR module";
         return false;
     }
 
@@ -174,9 +174,8 @@ bool RunMlirPassPipeline(ParsedMlirModule& module,
 
     std::string pipeline_errors;
     llvm::raw_string_ostream pipeline_errors_stream(pipeline_errors);
-    if (mlir::failed(
-            mlir::parsePassPipeline(pass_pipeline, pass_manager,
-                                    pipeline_errors_stream))) {
+    if (mlir::failed(mlir::parsePassPipeline(
+            pass_pipeline, pass_manager, pipeline_errors_stream))) {
         pipeline_errors_stream.flush();
         out_diagnostic.stage = "mlir-pass-pipeline";
         out_diagnostic.message =
