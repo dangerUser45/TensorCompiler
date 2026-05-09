@@ -24,6 +24,19 @@ add_test(
   COMMAND $<TARGET_FILE:tc_backend_mlir_frontend_parser_test>
 )
 
+add_executable(tc_backend_codegen_driver_test
+    codegen_driver_test.cpp
+)
+
+target_link_libraries(tc_backend_codegen_driver_test PRIVATE
+    tc_backend
+)
+
+add_test(
+  NAME backend_codegen_driver
+  COMMAND $<TARGET_FILE:tc_backend_codegen_driver_test>
+)
+
 if (TC_BACKEND_HAS_MLIR)
 add_executable(tc_backend_mlir_parse_test
     mlir_parse_test.cpp
