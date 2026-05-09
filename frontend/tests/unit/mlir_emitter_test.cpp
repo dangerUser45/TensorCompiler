@@ -206,6 +206,43 @@ tc::frontend::Graph MakeSingleMulGraph()
     return graph;
 }
 
+tc::frontend::Graph MakeSingleReshapeGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("reshape_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(
+        MakeTensor("input", { 2, 3, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(
+        MakeTensor("output", { 6, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("reshape_0");
+    node->set_name_op("Reshape");
+    node->set_op_kind(tc::frontend::OpKind::kReshape);
+    node->set_inputs({ "input", "shape" });
+    node->set_outputs({ "output" });
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    tc::frontend::Graph::InitVecT inits;
+    auto shape_init = std::make_unique<tc::frontend::Initializers>();
+    shape_init->set_name("shape");
+    shape_init->set_shape({ 2 });
+    shape_init->set_values<int64_t>({ 6, 4 });
+    inits.push_back(std::move(shape_init));
+    graph.set_inits(std::move(inits));
+
+    return graph;
+}
+
 void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
                          const std::string& name,
                          const std::vector<int64_t>& shape_dims)
@@ -757,4 +794,44 @@ TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
     ASSERT_NE(empty_pos, std::string::npos) << mlir_text;
     ASSERT_NE(matmul_pos, std::string::npos) << mlir_text;
     EXPECT_LT(empty_pos, matmul_pos) << mlir_text;
+}
+
+TEST(MlirEmitter, ReshapeGraphEmitsTensorReshape)
+{
+    const auto graph = MakeSingleReshapeGraph();
+    ASSERT_EQ(graph.get_input_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_output_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kReshape);
+    ASSERT_EQ(graph.get_nodes()[0]->get_inputs().size(), 2u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_outputs().size(), 1u);
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+
+    // Check function signature
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: tensor<2x3x4xf32>) "
+                             "-> tensor<6x4xf32>"),
+              std::string::npos)
+        << mlir_text;
+
+    // Check Reshape operation uses tensor.reshape
+    EXPECT_NE(mlir_text.find("tensor.reshape"), std::string::npos) << mlir_text;
+
+    // No unrealized_conversion_cast should be present
+    EXPECT_EQ(mlir_text.find("builtin.unrealized_conversion_cast"),
+              std::string::npos)
+        << mlir_text;
+
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }

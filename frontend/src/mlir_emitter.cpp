@@ -594,8 +594,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     result = input;
                 } else {
                     result = MlirValue{ NextTemp(), result_type };
-                    out << "    " << result->name
-                        << " = builtin.unrealized_conversion_cast "
+                    out << "    " << result->name << " = tensor.reshape "
                         << input.name << " : " << input.type << " to "
                         << result_type << '\n';
                 }
