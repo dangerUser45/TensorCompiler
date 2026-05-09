@@ -11,6 +11,19 @@ add_test(
   COMMAND $<TARGET_FILE:tc_backend_smoke>
 )
 
+add_executable(tc_backend_mlir_frontend_parser_test
+    mlir_frontend_parser_test.cpp
+)
+
+target_link_libraries(tc_backend_mlir_frontend_parser_test PRIVATE
+    tc_backend
+)
+
+add_test(
+  NAME backend_mlir_frontend_parser
+  COMMAND $<TARGET_FILE:tc_backend_mlir_frontend_parser_test>
+)
+
 if (TC_BACKEND_HAS_MLIR)
 add_executable(tc_backend_mlir_parse_test
     mlir_parse_test.cpp

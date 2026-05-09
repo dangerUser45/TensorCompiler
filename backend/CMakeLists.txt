@@ -35,6 +35,7 @@ endif()
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 
 add_library(tc_backend STATIC
+    src/frontend_mlir.cpp
     src/llvm_target_init.cpp
     src/mlir_context.cpp
     src/mlir_pipeline.cpp
