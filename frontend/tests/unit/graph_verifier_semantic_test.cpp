@@ -194,6 +194,45 @@ tc::frontend::Graph MakeConvGraph(
     return graph;
 }
 
+tc::frontend::Graph MakeReshapeGraph(bool include_shape_as_runtime_input)
+{
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kReshape,
+        "Reshape",
+        { "x", "shape" },
+        { "y" },
+        {},
+        {
+            { "x", tc::frontend::TypeInfo<float>::type },
+            { "shape", tc::frontend::TypeInfo<int64_t>::type },
+            { "y", tc::frontend::TypeInfo<float>::type },
+        },
+        {
+            { "x", { 1, 2, 2 } },
+            { "shape", { 2 } },
+            { "y", { 1, 4 } },
+        });
+
+    tc::frontend::Graph::InitVecT inits;
+    auto shape_init =
+        MakeInitializer("shape", { 2 }, tc::frontend::TypeInfo<int64_t>::type);
+    shape_init->set_values<int64_t>({ 1, 4 });
+    inits.push_back(std::move(shape_init));
+    graph.set_inits(std::move(inits));
+
+    if (!include_shape_as_runtime_input) {
+        tc::frontend::Graph::TensVecT input_tensors;
+        auto x = std::make_unique<tc::frontend::TensorInfo>();
+        x->set_name("x");
+        x->set_shape({ 1, 2, 2 });
+        x->set_data_type(tc::frontend::TypeInfo<float>::type);
+        input_tensors.push_back(std::move(x));
+        graph.set_input_tensors(std::move(input_tensors));
+    }
+
+    return graph;
+}
+
 TEST(GraphVerifierSemantic, ValidReluGraphPasses)
 {
     auto graph = MakeSingleNodeGraph(
@@ -486,6 +525,49 @@ TEST(GraphVerifierSemantic, ValidMulGraphPasses)
     tc::frontend::verify::Report report;
     EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
         << "expected valid mul graph to pass semantic checks\n"
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ValidReshapeGraphPasses)
+{
+    auto graph = MakeReshapeGraph(true);
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ReshapeWithoutInitializerShapeFails)
+{
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kReshape,
+        "Reshape",
+        { "x", "shape" },
+        { "y" },
+        {},
+        {
+            { "x", tc::frontend::TypeInfo<float>::type },
+            { "shape", tc::frontend::TypeInfo<int64_t>::type },
+            { "y", tc::frontend::TypeInfo<float>::type },
+        },
+        {
+            { "x", { 1, 2, 2 } },
+            { "shape", { 2 } },
+            { "y", { 1, 4 } },
+        });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "must be an INT64 initializer"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ExecutableVerifierAllowsReshapeInt64Initializer)
+{
+    auto graph = MakeReshapeGraph(false);
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecutable(graph, report))
         << DiagnosticsAsString(report);
 }
 

@@ -62,6 +62,37 @@ void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
     return model;
 }
 
+::onnx::ModelProto BuildReshapeModel()
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_reshape_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 2, 2 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 4 });
+
+    auto* shape_init = graph->add_initializer();
+    shape_init->set_name("shape");
+    shape_init->set_data_type(::onnx::TensorProto_DataType_INT64);
+    shape_init->add_dims(2);
+    shape_init->add_int64_data(1);
+    shape_init->add_int64_data(4);
+
+    auto* node = graph->add_node();
+    node->set_name("reshape_0");
+    node->set_op_type("Reshape");
+    node->add_input("x");
+    node->add_input("shape");
+    node->add_output("y");
+
+    return model;
+}
+
 class TempModelFile final
 {
 public:
@@ -166,6 +197,39 @@ TEST(ImporterOpKind, ConvFixtureSetsConvAndBiasAddKinds)
     ASSERT_NE(graph.get_nodes()[1], nullptr);
     EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(), tc::frontend::OpKind::kConv);
     EXPECT_EQ(graph.get_nodes()[1]->get_op_kind(), tc::frontend::OpKind::kAdd);
+}
+
+TEST(ImporterOpKind, ReshapeSetsReshapeKind)
+{
+    const TempModelFile temp_model(BuildReshapeModel());
+
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kReshape);
+}
+
+TEST(ImporterOpKind, MnistModelFailsOnLaterUnsupportedOperator)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        ModelPath("mnist-8.onnx").string(), model, graph, error));
+    EXPECT_NE(error.find("op 'Conv' supports only auto_pad=NOTSET"),
+              std::string::npos)
+        << error;
+    EXPECT_EQ(error.find("unsupported operator: Reshape"), std::string::npos)
+        << error;
 }
 
 TEST(ImporterOpKind, UnsupportedModelStillFails)

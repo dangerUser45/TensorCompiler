@@ -17,6 +17,8 @@ TEST(OpKind, ParsesKnownOperators)
               tc::frontend::OpKind::kConv);
     EXPECT_EQ(tc::frontend::OpKindFromString("MatMul"),
               tc::frontend::OpKind::kMatMul);
+    EXPECT_EQ(tc::frontend::OpKindFromString("Reshape"),
+              tc::frontend::OpKind::kReshape);
     EXPECT_EQ(tc::frontend::OpKindFromString("Transpose"),
               tc::frontend::OpKind::kTranspose);
 }
@@ -36,6 +38,8 @@ TEST(OpKind, HasStableStringNames)
     EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kMul), "Mul");
     EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kConv), "Conv");
     EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kMatMul), "MatMul");
+    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kReshape),
+              "Reshape");
     EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kTranspose),
               "Transpose");
     EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kUnknown),

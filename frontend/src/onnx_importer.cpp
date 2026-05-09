@@ -648,6 +648,7 @@ bool NormalizeNodeAttributes(OpKind op_kind,
             case OpKind::kMul:
             case OpKind::kConv:
             case OpKind::kMatMul:
+            case OpKind::kReshape:
                 return SetError(out_error,
                                 "ERROR: " + node_context + " op '" +
                                     std::string(ToString(op_kind)) +
@@ -863,6 +864,18 @@ bool ParseNode(const ::onnx::NodeProto& src,
             return SetError(out_error,
                             "ERROR: " + node_context +
                                 " op 'Conv' expects 1 output");
+        }
+    }
+    if (op_kind == OpKind::kReshape) {
+        if (src.input_size() != 2) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Reshape' expects 2 inputs");
+        }
+        if (src.output_size() != 1) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Reshape' expects 1 output");
         }
     }
 

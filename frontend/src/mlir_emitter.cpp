@@ -116,6 +116,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             kind != tc::frontend::OpKind::kAdd &&
             kind != tc::frontend::OpKind::kMul &&
             kind != tc::frontend::OpKind::kConv &&
+            kind != tc::frontend::OpKind::kReshape &&
             kind != tc::frontend::OpKind::kMatMul) {
             return false;
         }
@@ -128,6 +129,7 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             case tc::frontend::OpKind::kAdd:
             case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kConv:
+            case tc::frontend::OpKind::kReshape:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
                 break;
@@ -405,8 +407,9 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         if (!init_ptr) {
             continue;
         }
-        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT) {
-            out_error = "ERROR: unsupported non-float32 initializer '" +
+        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT &&
+            init_ptr->get_data_type().id != tc::frontend::DataID::INT64) {
+            out_error = "ERROR: unsupported initializer dtype for '" +
                         init_ptr->get_name() + "' for production MLIR";
             return false;
         }
@@ -417,7 +420,9 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             return false;
         }
         tensor_types[init_ptr->get_name()] = init_type;
-        initializers_by_name[init_ptr->get_name()] = init_ptr.get();
+        if (init_ptr->get_data_type().id == tc::frontend::DataID::FLOAT) {
+            initializers_by_name[init_ptr->get_name()] = init_ptr.get();
+        }
     }
 
     std::size_t const_id = 0;
@@ -578,6 +583,22 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     << lhs.name << ", " << rhs.name << " : " << lhs.type << ", "
                     << rhs.type << ") outs(" << init << " : " << result_type
                     << ") -> " << result_type << '\n';
+                break;
+            }
+
+            case tc::frontend::OpKind::kReshape: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                if (input.type == result_type) {
+                    result = input;
+                } else {
+                    result = MlirValue{ NextTemp(), result_type };
+                    out << "    " << result->name
+                        << " = builtin.unrealized_conversion_cast "
+                        << input.name << " : " << input.type << " to "
+                        << result_type << '\n';
+                }
                 break;
             }
 
