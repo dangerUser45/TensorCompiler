@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -12,7 +13,13 @@ struct ModelCase final
 {
     std::string model_file;
     std::vector<std::string> mlir_expectations;
+    bool expect_emit_mlir = true;
 };
+
+bool Contains(std::string_view text, std::string_view fragment)
+{
+    return text.find(fragment) != std::string_view::npos;
+}
 
 struct Config final
 {
@@ -44,6 +51,10 @@ TEST(VerifyEmitMatrix, MandatoryModelsPassVerifyAndEmitMlir)
         { "add.onnx", { "arith.addf", "op=Add" } },
         { "matmul_2d.onnx", { "linalg.matmul", "op=MatMul" } },
         { "matmul_addmm.onnx", { "linalg.matmul", "arith.addf" } },
+        { "conv_2d_nchw_fchw.onnx",
+          { "linalg.conv_2d_nchw_fchw",
+            "op=Conv",
+            "arith.constant dense<[-1.5" } },
     };
 
     for (const auto& test_case : cases) {
@@ -79,6 +90,16 @@ TEST(VerifyEmitMatrix, MandatoryModelsPassVerifyAndEmitMlir)
         const auto emit_result =
             tc::frontend::testutil::RunCommandWithCapturedOutput(
                 emit_cmd, "tc_matrix_emit");
+        if (!test_case.expect_emit_mlir) {
+            EXPECT_NE(emit_result.exit_code, 0)
+                << "emit-mlir unexpectedly passed for model: "
+                << test_case.model_file;
+            EXPECT_TRUE(Contains(emit_result.output, "unsupported graph"))
+                << "missing unsupported graph diagnostic for model: "
+                << test_case.model_file << "\noutput:\n"
+                << emit_result.output;
+            continue;
+        }
         EXPECT_EQ(emit_result.exit_code, 0)
             << "emit-mlir failed for model: " << test_case.model_file
             << "\noutput:\n"

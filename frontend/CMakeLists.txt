@@ -48,6 +48,7 @@ add_library(tc_frontend_onnx STATIC
     src/onnx_importer.cpp
     src/graph_verifier.cpp
     src/mlir_emitter.cpp
+    src/model_metadata.cpp
     ${PROTO_SRCS}
 )
 
@@ -72,6 +73,7 @@ add_executable(frontend_driver
 
 target_compile_definitions(frontend_driver PRIVATE
     TC_DEFAULT_DUMP_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/dump\" 
+    TC_DEFAULT_METADATA_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/metadata\"
 )
 target_link_libraries(frontend_driver PRIVATE
     tc_frontend_onnx

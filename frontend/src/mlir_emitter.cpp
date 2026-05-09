@@ -1,10 +1,12 @@
 #include "mlir_emitter.hpp"
 
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -111,6 +113,8 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
         if (kind != tc::frontend::OpKind::kRelu &&
             kind != tc::frontend::OpKind::kTranspose &&
             kind != tc::frontend::OpKind::kAdd &&
+            kind != tc::frontend::OpKind::kMul &&
+            kind != tc::frontend::OpKind::kConv &&
             kind != tc::frontend::OpKind::kMatMul) {
             return false;
         }
@@ -121,6 +125,8 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
                 expected_inputs = 1;
                 break;
             case tc::frontend::OpKind::kAdd:
+            case tc::frontend::OpKind::kMul:
+            case tc::frontend::OpKind::kConv:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
                 break;
@@ -198,6 +204,11 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     if (input_dims.size() > output_dims.size()) {
         return false;
     }
+    if (input_dims.size() == 1 && output_dims.size() >= 2 &&
+        IsBroadcastCompatibleDim(input_dims[0], output_dims[1])) {
+        out_dimensions = "1";
+        return true;
+    }
 
     const std::size_t offset = output_dims.size() - input_dims.size();
     for (std::size_t axis = 0; axis < output_dims.size(); ++axis) {
@@ -218,6 +229,52 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     }
     out_dimensions = dims.str();
     return true;
+}
+
+std::string FormatFloatLiteral(float value)
+{
+    std::ostringstream out;
+    out << std::setprecision(9) << value;
+    std::string text = out.str();
+    if (text.find('.') == std::string::npos &&
+        text.find('e') == std::string::npos &&
+        text.find('E') == std::string::npos) {
+        text += ".0";
+    }
+    return text;
+}
+
+std::string BuildDenseFloatLiteral(const std::vector<float>& values)
+{
+    if (values.size() == 1) {
+        return "dense<" + FormatFloatLiteral(values.front()) + ">";
+    }
+
+    std::ostringstream out;
+    out << "dense<[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << FormatFloatLiteral(values[i]);
+    }
+    out << "]>";
+    return out.str();
+}
+
+std::string EmitFloatInitializerConstant(std::ostream& out,
+                                         const tc::frontend::Initializers& init,
+                                         std::size_t& const_id)
+{
+    std::string init_type;
+    std::string ignored_error;
+    (void)BuildMlirTensorType(init, init_type, ignored_error, "initializer");
+
+    const std::string const_name = "%cst" + std::to_string(const_id++);
+    out << "    " << const_name << " = arith.constant "
+        << BuildDenseFloatLiteral(init.get_values<float>()) << " : "
+        << init_type << '\n';
+    return const_name;
 }
 
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
@@ -265,7 +322,7 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
     out << "module {\n";
     out << "  // tc.graph: " << GraphNameOrFallback(graph) << '\n';
     out << "  // tc.node_count: " << graph.get_nodes().size() << '\n';
-    out << "  func.func @main(";
+    out << "  func.func @tc_model(";
     for (std::size_t i = 0; i < input_types.size(); ++i) {
         if (i != 0) {
             out << ", ";
@@ -299,14 +356,52 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         };
     }
 
+    std::unordered_map<std::string, const tc::frontend::Initializers*>
+        initializers_by_name;
+    for (const auto& init_ptr : graph.get_inits()) {
+        if (!init_ptr) {
+            continue;
+        }
+        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT) {
+            out_error = "ERROR: unsupported non-float32 initializer '" +
+                        init_ptr->get_name() + "' for production MLIR";
+            return false;
+        }
+
+        std::string init_type;
+        if (!BuildMlirTensorType(
+                *init_ptr, init_type, out_error, "initializer")) {
+            return false;
+        }
+        tensor_types[init_ptr->get_name()] = init_type;
+        initializers_by_name[init_ptr->get_name()] = init_ptr.get();
+    }
+
+    std::size_t const_id = 0;
     std::size_t temp_id = 0;
     auto NextTemp = [&temp_id]() { return "%t" + std::to_string(temp_id++); };
     auto ResolveInputValue = [&values_by_tensor,
+                              &initializers_by_name,
+                              &tensor_types,
+                              &const_id,
+                              &out,
                               &input_types](const std::string& tensor_name) {
         const auto it = values_by_tensor.find(tensor_name);
         if (it != values_by_tensor.end()) {
             return it->second;
         }
+
+        const auto init_it = initializers_by_name.find(tensor_name);
+        if (init_it != initializers_by_name.end()) {
+            const auto& init = *init_it->second;
+            const std::string const_name =
+                EmitFloatInitializerConstant(out, init, const_id);
+            const std::string init_type = tensor_types.at(tensor_name);
+            const MlirValue value{ const_name, init_type };
+            values_by_tensor[tensor_name] = value;
+            return value;
+        }
+
         return MlirValue{ "%arg0", input_types.front() };
     };
     auto ResolveTensorType = [&tensor_types](const std::string& tensor_name,
@@ -409,6 +504,21 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 break;
             }
 
+            case tc::frontend::OpKind::kMul: {
+                MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
+                MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, lhs.type);
+
+                lhs = MaterializeToType(lhs, result_type);
+                rhs = MaterializeToType(rhs, result_type);
+
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name << " = arith.mulf " << lhs.name
+                    << ", " << rhs.name << " : " << result_type << '\n';
+                break;
+            }
+
             case tc::frontend::OpKind::kMatMul: {
                 const MlirValue lhs = ResolveInputValue(node.get_inputs()[0]);
                 const MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
@@ -437,6 +547,24 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     << input.name << " : " << input.type << ") outs(" << init
                     << " : " << result_type << ") permutation = ["
                     << BuildPermutation(node) << "]\n";
+                break;
+            }
+
+            case tc::frontend::OpKind::kConv: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const MlirValue weight =
+                    ResolveInputValue(node.get_inputs()[1]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                out << "    " << init << " = tensor.empty() : " << result_type
+                    << '\n';
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name
+                    << " = linalg.conv_2d_nchw_fchw ins(" << input.name << ", "
+                    << weight.name << " : " << input.type << ", " << weight.type
+                    << ") outs(" << init << " : " << result_type << ") -> "
+                    << result_type << '\n';
                 break;
             }
 
@@ -477,6 +605,21 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
 } // namespace
 
 namespace tc::frontend::mlir {
+
+bool EmitMlirModule(const Graph& graph,
+                    std::string& out_mlir_text,
+                    std::string& out_error)
+{
+    out_mlir_text.clear();
+    out_error.clear();
+
+    if (!CanEmitSimpleEntry(graph)) {
+        out_error = "ERROR: unsupported graph for production MLIR";
+        return false;
+    }
+
+    return EmitSimpleMain(graph, out_mlir_text, out_error);
+}
 
 bool EmitMlirModuleSkeleton(const Graph& graph,
                             std::string& out_mlir_text,

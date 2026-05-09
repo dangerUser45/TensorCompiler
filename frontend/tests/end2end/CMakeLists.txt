@@ -134,6 +134,21 @@ set_tests_properties(emit_mlir_matmul_addmm PROPERTIES
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+add_test(
+  NAME emit_mlir_conv
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/conv_2d_nchw_fchw.onnx
+          --expect op=Conv
+          --expect linalg.conv_2d_nchw_fchw
+          --expect "arith.constant dense<[-1.5"
+)
+
+set_tests_properties(emit_mlir_conv PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_executable(verify_shape_invalid_test
   src/verify_shape_invalid_test.cpp
 )
@@ -151,6 +166,27 @@ add_test(
 )
 
 set_tests_properties(verify_shape_invalid PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_executable(verify_exec_test
+  src/verify_exec_test.cpp
+)
+
+target_link_libraries(verify_exec_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME verify_exec
+  COMMAND verify_exec_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/add.onnx
+)
+
+set_tests_properties(verify_exec PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
@@ -194,6 +230,27 @@ add_test(
 )
 
 set_tests_properties(verify_emit_matrix PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+add_executable(metadata_test
+  src/metadata_test.cpp
+)
+
+target_link_libraries(metadata_test PRIVATE
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME metadata
+  COMMAND metadata_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${CMAKE_SOURCE_DIR}/models/conv_2d_nchw_fchw.onnx
+)
+
+set_tests_properties(metadata PROPERTIES
   LABELS "end2end"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 )

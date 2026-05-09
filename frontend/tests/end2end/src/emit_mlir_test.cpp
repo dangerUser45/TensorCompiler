@@ -74,7 +74,7 @@ TEST(EmitMlir, WritesMlirFileForSupportedModel)
     const std::string mlir_text =
         tc::frontend::testutil::ReadFileToString(mlir_output);
     const std::vector<std::string> default_expectations = {
-        "module {", "func.func @main("
+        "module {", "func.func @tc_model("
     };
     const std::vector<std::string>& expectations =
         g_config.expected_substrings.empty() ? default_expectations

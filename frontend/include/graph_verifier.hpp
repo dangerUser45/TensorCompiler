@@ -55,4 +55,6 @@ const char* SeverityToString(Severity severity) noexcept;
 
 bool VerifyGraphForExecution(const Graph& graph, Report& out_report);
 
+bool VerifyGraphForExecutable(const Graph& graph, Report& out_report);
+
 } // namespace tc::frontend::verify
