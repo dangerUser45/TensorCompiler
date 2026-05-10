@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -82,15 +84,12 @@ struct TensorStorage final
 
 std::string FloatLiteral(float value)
 {
-    if (std::isnan(value)) {
-        return "0x7FF8000000000000";
-    }
-    if (std::isinf(value)) {
-        return value > 0 ? "0x7FF0000000000000" : "0xFFF0000000000000";
-    }
-
+    const double promoted = static_cast<double>(value);
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &promoted, sizeof(bits));
     std::ostringstream out;
-    out << std::scientific << std::setprecision(9) << value;
+    out << "0x" << std::uppercase << std::hex << std::setw(16)
+        << std::setfill('0') << bits;
     return out.str();
 }
 

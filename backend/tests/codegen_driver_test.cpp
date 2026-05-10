@@ -55,6 +55,16 @@ module {
 }
 )mlir";
 
+const char* kNonExactFloatConstantMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1xf32>) -> tensor<1xf32> {
+    %cst0 = arith.constant dense<1.018964529> : tensor<1xf32>
+    %t0 = arith.addf %arg0, %cst0 : tensor<1xf32>
+    return %t0 : tensor<1xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -175,6 +185,28 @@ int main()
                                    "tc_codegen_maxpool_test.ll"),
                 "llc must accept MaxPool LLVM IR")) {
         std::cerr << maxpool_ir << '\n';
+        return 1;
+    }
+
+    std::string non_exact_constant_ir;
+    if (!Expect(tc::backend::EmitLlvmIrFromMlirText(kNonExactFloatConstantMlir,
+                                                    "non_exact_constant.mlir",
+                                                    {},
+                                                    {},
+                                                    non_exact_constant_ir,
+                                                    diagnostic),
+                "non-exact float constant MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(non_exact_constant_ir.find("0x") != std::string::npos,
+                "non-exact float constants must be hex literals") ||
+        !Expect(ValidateLlvmIr(non_exact_constant_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_non_exact_constant_test.ll"),
+                "llc must accept non-exact float constant LLVM IR")) {
+        std::cerr << non_exact_constant_ir << '\n';
         return 1;
     }
 
