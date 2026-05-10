@@ -285,6 +285,41 @@ bool ReadRequiredIntAttr(const tc::frontend::Node& node,
     return true;
 }
 
+bool ReadMaxPoolIntAttr(const tc::frontend::Node& node,
+                        const std::string& node_context,
+                        std::string_view attr_name,
+                        std::size_t expected_size,
+                        bool required,
+                        tc::frontend::verify::Report& report,
+                        std::vector<int64_t>& out_values)
+{
+    out_values.clear();
+    const auto* attr = FindAttr(node, attr_name);
+    if (attr == nullptr) {
+        if (required) {
+            report.add_error("ERROR: " + node_context +
+                             " op 'MaxPool' missing " + std::string(attr_name));
+            return false;
+        }
+        return true;
+    }
+    if (attr->get_data_type().id != tc::frontend::DataID::INT64) {
+        report.add_error("ERROR: " + node_context +
+                         " op 'MaxPool' attribute '" + std::string(attr_name) +
+                         "' must be INT64");
+        return false;
+    }
+    out_values = attr->get_values<int64_t>();
+    if (out_values.size() != expected_size) {
+        report.add_error("ERROR: " + node_context +
+                         " op 'MaxPool' attribute '" + std::string(attr_name) +
+                         "' must have " + std::to_string(expected_size) +
+                         " values");
+        return false;
+    }
+    return true;
+}
+
 bool AllPositive(const std::vector<int64_t>& values)
 {
     return std::all_of(
@@ -381,6 +416,7 @@ private:
                 }
                 break;
             case tc::frontend::OpKind::kTranspose:
+            case tc::frontend::OpKind::kMaxPool:
                 if (input_count != 1) {
                     AddArityError(
                         node_context, op_kind, "input(s)", 1, input_count);
@@ -613,6 +649,30 @@ private:
                                       " op 'Conv' input dtypes mismatch: " +
                                       DtypeName(input_dtype) + " vs " +
                                       DtypeName(weight_dtype));
+                    return;
+                }
+
+                inferred_output_dtype = input_dtype;
+                has_inferred_output_dtype = true;
+                break;
+            }
+
+            case tc::frontend::OpKind::kMaxPool: {
+                if (node.get_inputs().empty()) {
+                    return;
+                }
+
+                tc::frontend::DataT input_dtype;
+                if (!ResolveInputDtype(
+                        node, node_context, 0, tensor_dtypes, input_dtype)) {
+                    return;
+                }
+
+                if (input_dtype.id != tc::frontend::DataID::FLOAT) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' expects float32 input, "
+                                      "got " +
+                                      DtypeName(input_dtype));
                     return;
                 }
 
@@ -1072,6 +1132,111 @@ private:
                 return;
             }
 
+            case tc::frontend::OpKind::kMaxPool: {
+                if (node.get_inputs().empty()) {
+                    return;
+                }
+                std::vector<int64_t> input_shape;
+                if (!ResolveInputShape(
+                        node, node_context, 0, tensor_shapes, input_shape)) {
+                    return;
+                }
+
+                if (input_shape.size() != 4) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' input rank must be 4");
+                    return;
+                }
+
+                std::vector<int64_t> kernel_shape;
+                std::vector<int64_t> strides;
+                std::vector<int64_t> pads;
+                const bool attrs_ok = ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "kernel_shape",
+                                                         2,
+                                                         /*required=*/true,
+                                                         report_,
+                                                         kernel_shape) &&
+                                      ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "strides",
+                                                         2,
+                                                         /*required=*/false,
+                                                         report_,
+                                                         strides) &&
+                                      ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "pads",
+                                                         4,
+                                                         /*required=*/false,
+                                                         report_,
+                                                         pads);
+                if (!attrs_ok) {
+                    return;
+                }
+                if (strides.empty()) {
+                    strides = { 1, 1 };
+                }
+                if (pads.empty()) {
+                    pads = { 0, 0, 0, 0 };
+                }
+
+                if (!AllPositive(kernel_shape) || !AllPositive(strides)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' kernel_shape and strides "
+                                      "must be positive");
+                    return;
+                }
+                if (!AllNonNegative(pads)) {
+                    report_.add_error(
+                        "ERROR: " + node_context +
+                        " op 'MaxPool' pads must be non-negative");
+                    return;
+                }
+
+                if (input_shape[2] == -1 || input_shape[3] == -1) {
+                    return;
+                }
+
+                const int64_t out_h = (input_shape[2] + pads[0] + pads[2] -
+                                       (kernel_shape[0] - 1) - 1) /
+                                          strides[0] +
+                                      1;
+                const int64_t out_w = (input_shape[3] + pads[1] + pads[3] -
+                                       (kernel_shape[1] - 1) - 1) /
+                                          strides[1] +
+                                      1;
+                if (out_h <= 0 || out_w <= 0) {
+                    report_.add_error(
+                        "ERROR: " + node_context +
+                        " op 'MaxPool' non-positive output shape");
+                    return;
+                }
+
+                const std::vector<int64_t> inferred_shape{
+                    input_shape[0], input_shape[1], out_h, out_w
+                };
+                for (const std::string& output_name : node.get_outputs()) {
+                    const auto* output_shape =
+                        FindTensorShape(tensor_shapes, output_name);
+                    if (output_shape && output_shape->size() != 4) {
+                        report_.add_error(
+                            "ERROR: " + node_context +
+                            " op 'MaxPool' output rank must be 4");
+                        return;
+                    }
+                }
+                ValidateDeclaredOutputShapes(node,
+                                             node_context,
+                                             "MaxPool",
+                                             inferred_shape,
+                                             tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -1251,6 +1416,7 @@ private:
 
             switch (op_kind) {
                 case tc::frontend::OpKind::kConv:
+                case tc::frontend::OpKind::kMaxPool:
                     break;
 
                 case tc::frontend::OpKind::kRelu:

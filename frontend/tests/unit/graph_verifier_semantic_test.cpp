@@ -981,4 +981,168 @@ TEST(GraphVerifierSemantic, ConvNonPositiveOutputShapeFails)
         << DiagnosticsAsString(report);
 }
 
+namespace {
+tc::frontend::Node::AttrVecT MakeMaxPoolAttrs(
+    std::vector<int64_t> kernel_shape = { 2, 2 },
+    std::vector<int64_t> strides = { 2, 2 },
+    std::vector<int64_t> pads = { 0, 0, 0, 0 },
+    std::string auto_pad = "NOTSET")
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("kernel_shape", std::move(kernel_shape)));
+    attrs.push_back(MakeIntsAttr("strides", std::move(strides)));
+    attrs.push_back(MakeIntsAttr("pads", std::move(pads)));
+    attrs.push_back(MakeStringAttr("auto_pad", std::move(auto_pad)));
+    return attrs;
+}
+
+tc::frontend::Graph MakeMaxPoolGraph(
+    tc::frontend::Node::AttrVecT attrs,
+    std::unordered_map<std::string, tc::frontend::DataT> tensor_types = {},
+    std::unordered_map<std::string, std::vector<int64_t>> tensor_shapes = {})
+{
+    if (tensor_shapes.empty()) {
+        tensor_shapes = {
+            { "x", { 1, 1, 4, 4 } },
+            { "y", { 1, 1, 2, 2 } },
+        };
+    }
+    if (tensor_types.empty()) {
+        tensor_types = {
+            { "x", tc::frontend::TypeInfo<float>::type },
+            { "y", tc::frontend::TypeInfo<float>::type },
+        };
+    }
+
+    return MakeSingleNodeGraph(tc::frontend::OpKind::kMaxPool,
+                               "MaxPool",
+                               { "x" },
+                               { "y" },
+                               std::move(attrs),
+                               std::move(tensor_types),
+                               std::move(tensor_shapes));
+}
+} // namespace
+
+TEST(GraphVerifierSemantic, ValidMaxPoolGraphPasses)
+{
+    auto graph = MakeMaxPoolGraph(MakeMaxPoolAttrs());
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolWithTwoInputsFails)
+{
+    auto graph = MakeSingleNodeGraph(tc::frontend::OpKind::kMaxPool,
+                                     "MaxPool",
+                                     { "x", "extra" },
+                                     { "y" },
+                                     MakeMaxPoolAttrs(),
+                                     {},
+                                     {
+                                         { "x", { 1, 1, 4, 4 } },
+                                         { "extra", { 1, 1, 4, 4 } },
+                                         { "y", { 1, 1, 2, 2 } },
+                                     });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_TRUE(HasDiagnosticContaining(report, "expects 1 input"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolInputRankMismatchFails)
+{
+    auto graph = MakeMaxPoolGraph(MakeMaxPoolAttrs(),
+                                  {},
+                                  {
+                                      { "x", { 1, 1, 4 } },
+                                      { "y", { 1, 1, 2, 2 } },
+                                  });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "input rank"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolNonFloatInputFails)
+{
+    auto graph =
+        MakeMaxPoolGraph(MakeMaxPoolAttrs(),
+                         {
+                             { "x", tc::frontend::TypeInfo<int32_t>::type },
+                             { "y", tc::frontend::TypeInfo<int32_t>::type },
+                         });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "expects float32"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolMissingKernelShapeAttrFails)
+{
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntsAttr("strides", { 1, 1 }));
+    attrs.push_back(MakeIntsAttr("pads", { 0, 0, 0, 0 }));
+    attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
+
+    auto graph = MakeMaxPoolGraph(std::move(attrs));
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "missing kernel_shape"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolOutputShapeMismatchFails)
+{
+    auto graph = MakeMaxPoolGraph(MakeMaxPoolAttrs(),
+                                  {},
+                                  {
+                                      { "x", { 1, 1, 4, 4 } },
+                                      { "y", { 1, 1, 3, 3 } },
+                                  });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "output shape mismatch"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolMnistKernel2Stride2Passes)
+{
+    // Mirrors MNIST MaxPool nodes: 2x2 kernel, stride 2, no padding.
+    auto graph =
+        MakeMaxPoolGraph(MakeMaxPoolAttrs({ 2, 2 }, { 2, 2 }, { 0, 0, 0, 0 }),
+                         {},
+                         {
+                             { "x", { 1, 8, 24, 24 } },
+                             { "y", { 1, 8, 12, 12 } },
+                         });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, MaxPoolNonPositiveOutputShapeFails)
+{
+    auto graph = MakeMaxPoolGraph(MakeMaxPoolAttrs({ 5, 5 }, { 1, 1 }),
+                                  {},
+                                  {
+                                      { "x", { 1, 1, 2, 2 } },
+                                      { "y", { 1, 1, -2, -2 } },
+                                  });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "non-positive output shape"))
+        << DiagnosticsAsString(report);
+}
+
 } // namespace
