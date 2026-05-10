@@ -796,12 +796,12 @@ TEST(MlirEmitter, ConvModelLowersToLinalgConvWithInitializerConstants)
         << mlir_text;
 }
 
-TEST(MlirEmitter, ConvWithNonDefaultAttrsFailsProductionEmission)
+TEST(MlirEmitter, ConvWithNonUnitStrideFailsProductionEmission)
 {
     tc::frontend::Node::AttrVecT attrs;
     attrs.push_back(MakeIntAttr("kernel_shape", { 2, 2 }));
     attrs.push_back(MakeIntAttr("strides", { 2, 2 }));
-    attrs.push_back(MakeIntAttr("pads", { 1, 1, 1, 1 }));
+    attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
     attrs.push_back(MakeIntAttr("dilations", { 1, 1 }));
     attrs.push_back(MakeIntAttr("group", { 1 }));
     auto graph = MakeConvGraphForMlir(std::move(attrs));
@@ -812,6 +812,79 @@ TEST(MlirEmitter, ConvWithNonDefaultAttrsFailsProductionEmission)
     EXPECT_TRUE(mlir_text.empty()) << mlir_text;
     EXPECT_NE(error.find("unsupported Conv attributes"), std::string::npos)
         << error;
+}
+
+TEST(MlirEmitter, ConvWithSameUpperPadsEmitsTensorPadAndPlainConv)
+{
+    // Build a single-Conv graph mirroring MNIST Convolution28: input
+    // tensor<1x1x28x28xf32>, weight tensor<8x1x5x5xf32>, output
+    // tensor<1x8x28x28xf32>, pads=[2,2,2,2], strides=[1,1], dilations=[1,1].
+    // The emitter must decompose padded Conv into tensor.pad + plain Conv.
+    tc::frontend::Graph graph;
+    graph.set_name("conv_padded_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(
+        MakeTensor("x", { 1, 1, 28, 28 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(
+        MakeTensor("y", { 1, 8, 28, 28 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    tc::frontend::Graph::InitVecT inits;
+    auto weight = std::make_unique<tc::frontend::Initializers>();
+    weight->set_name("w");
+    weight->set_shape({ 8, 1, 5, 5 });
+    weight->set_values<float>(std::vector<float>(8 * 1 * 5 * 5, 1.0f));
+    inits.push_back(std::move(weight));
+    graph.set_inits(std::move(inits));
+
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntAttr("kernel_shape", { 5, 5 }));
+    attrs.push_back(MakeIntAttr("strides", { 1, 1 }));
+    attrs.push_back(MakeIntAttr("pads", { 2, 2, 2, 2 }));
+    attrs.push_back(MakeIntAttr("dilations", { 1, 1 }));
+    attrs.push_back(MakeIntAttr("group", { 1 }));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("conv_0");
+    node->set_name_op("Conv");
+    node->set_op_kind(tc::frontend::OpKind::kConv);
+    node->set_inputs({ "x", "w" });
+    node->set_outputs({ "y" });
+    node->set_attr(std::move(attrs));
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    std::string mlir_text;
+    std::string error;
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("TODO(tc)"), std::string::npos) << mlir_text;
+    // Pad scalar zero of f32.
+    EXPECT_NE(mlir_text.find("arith.constant 0"), std::string::npos)
+        << mlir_text;
+    // Pad with NCHW low/high layout puts spatial pads on dims 2/3 only.
+    EXPECT_NE(mlir_text.find("tensor.pad"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("low[0, 0, 2, 2]"), std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("high[0, 0, 2, 2]"), std::string::npos)
+        << mlir_text;
+    EXPECT_NE(mlir_text.find("tensor.yield"), std::string::npos) << mlir_text;
+    // Padded type: 28 + 2 + 2 = 32 in spatial dims.
+    EXPECT_NE(mlir_text.find("tensor<1x1x32x32xf32>"), std::string::npos)
+        << mlir_text;
+    // The conv itself runs on the padded tensor.
+    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw"), std::string::npos)
+        << mlir_text;
+    // Output type unchanged (1x8x28x28).
+    EXPECT_NE(mlir_text.find("tensor<1x8x28x28xf32>"), std::string::npos)
+        << mlir_text;
 }
 
 TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)

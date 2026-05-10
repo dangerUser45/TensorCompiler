@@ -322,8 +322,60 @@ bool IntAttrEquals(const tc::frontend::Node& node,
 bool ConvAttrsSupportedForPlainLinalg(const tc::frontend::Node& node)
 {
     return IntAttrEquals(node, "strides", { 1, 1 }) &&
-           IntAttrEquals(node, "pads", { 0, 0, 0, 0 }) &&
            IntAttrEquals(node, "dilations", { 1, 1 });
+}
+
+bool ConvHasZeroPads(const tc::frontend::Node& node)
+{
+    return IntAttrEquals(node, "pads", { 0, 0, 0, 0 });
+}
+
+bool BuildNchwPaddedTensorType(std::string_view input_type,
+                               const std::vector<int64_t>& pads,
+                               std::string& out_type)
+{
+    out_type.clear();
+    if (!IsTensorType(input_type) || pads.size() != 4) {
+        return false;
+    }
+
+    std::vector<std::string> dims;
+    if (!ParseTensorTypeShape(input_type, dims) || dims.size() != 4) {
+        return false;
+    }
+
+    const std::string_view body = input_type.substr(7, input_type.size() - 8);
+    const std::size_t last_x = body.rfind('x');
+    if (last_x == std::string_view::npos) {
+        return false;
+    }
+    const std::string_view elem_type = body.substr(last_x + 1);
+
+    auto try_parse_dim = [](const std::string& s) -> std::optional<int64_t> {
+        if (s == "?") {
+            return std::nullopt;
+        }
+        try {
+            return std::stoll(s);
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+
+    const auto h_opt = try_parse_dim(dims[2]);
+    const auto w_opt = try_parse_dim(dims[3]);
+    if (!h_opt.has_value() || !w_opt.has_value()) {
+        return false;
+    }
+
+    const int64_t new_h = *h_opt + pads[0] + pads[2];
+    const int64_t new_w = *w_opt + pads[1] + pads[3];
+
+    std::ostringstream out;
+    out << "tensor<" << dims[0] << "x" << dims[1] << "x" << new_h << "x"
+        << new_w << "x" << elem_type << ">";
+    out_type = out.str();
+    return true;
 }
 
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
@@ -639,13 +691,42 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 if (!ConvAttrsSupportedForPlainLinalg(node)) {
                     out_error =
                         "ERROR: unsupported Conv attributes for production "
-                        "MLIR; only pads=[0,0,0,0], strides=[1,1], and "
-                        "dilations=[1,1] are currently supported";
+                        "MLIR; only strides=[1,1] and dilations=[1,1] are "
+                        "currently supported";
                     return false;
                 }
-                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                MlirValue input = ResolveInputValue(node.get_inputs()[0]);
                 const MlirValue weight =
                     ResolveInputValue(node.get_inputs()[1]);
+
+                if (!ConvHasZeroPads(node)) {
+                    const auto* pads_attr = FindAttr(node, "pads");
+                    const auto& pads = pads_attr->get_values<int64_t>();
+                    std::string padded_type;
+                    if (!BuildNchwPaddedTensorType(
+                            input.type, pads, padded_type)) {
+                        out_error =
+                            "ERROR: Conv padded input type computation "
+                            "requires rank-4 NCHW tensor with static spatial "
+                            "dims";
+                        return false;
+                    }
+                    const std::string zero_const = NextTemp();
+                    out << "    " << zero_const
+                        << " = arith.constant 0.000000e+00 : f32\n";
+                    const std::string padded_name = NextTemp();
+                    out << "    " << padded_name << " = tensor.pad "
+                        << input.name << " low[0, 0, " << pads[0] << ", "
+                        << pads[1] << "] high[0, 0, " << pads[2] << ", "
+                        << pads[3] << "] {\n"
+                        << "    ^bb0(%i: index, %j: index, %k: index, %l: "
+                           "index):\n"
+                        << "      tensor.yield " << zero_const << " : f32\n"
+                        << "    } : " << input.type << " to " << padded_type
+                        << '\n';
+                    input = MlirValue{ padded_name, padded_type };
+                }
+
                 const std::string result_type =
                     ResolveTensorType(output_name, output_ty);
                 const std::string init = NextTemp();
