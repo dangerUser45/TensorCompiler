@@ -155,8 +155,7 @@ add_test(
           --driver $<TARGET_FILE:frontend_driver>
           --model ${PROJECT_SOURCE_DIR}/models/mnist-8.onnx
           --expect "func.func @tc_model(%arg0: tensor<1x1x28x28xf32>) -> tensor<1x10xf32>"
-          --expect tensor.pad
-          --expect linalg.conv_2d_nchw_fchw
+          --expect "linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]}"
           --expect linalg.pooling_nchw_max
           --expect linalg.matmul
           --expect tensor.reshape

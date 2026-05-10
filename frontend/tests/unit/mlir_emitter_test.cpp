@@ -814,12 +814,15 @@ TEST(MlirEmitter, ConvWithNonUnitStrideFailsProductionEmission)
         << error;
 }
 
-TEST(MlirEmitter, ConvWithSameUpperPadsEmitsTensorPadAndPlainConv)
+TEST(MlirEmitter, ConvWithSameUpperPadsEmitsConvWithPadsAttribute)
 {
     // Build a single-Conv graph mirroring MNIST Convolution28: input
     // tensor<1x1x28x28xf32>, weight tensor<8x1x5x5xf32>, output
     // tensor<1x8x28x28xf32>, pads=[2,2,2,2], strides=[1,1], dilations=[1,1].
-    // The emitter must decompose padded Conv into tensor.pad + plain Conv.
+    // The emitter must keep this as a single linalg.conv_2d_nchw_fchw op
+    // carrying an explicit {pads = [...]} attribute, so the backend's
+    // single-line regex parser can read pads without needing region-body
+    // (tensor.pad) support.
     tc::frontend::Graph graph;
     graph.set_name("conv_padded_graph");
 
@@ -866,24 +869,47 @@ TEST(MlirEmitter, ConvWithSameUpperPadsEmitsTensorPadAndPlainConv)
         << error;
 
     EXPECT_EQ(mlir_text.find("TODO(tc)"), std::string::npos) << mlir_text;
-    // Pad scalar zero of f32.
-    EXPECT_NE(mlir_text.find("arith.constant 0"), std::string::npos)
+    // Padded Conv must NOT be decomposed into tensor.pad anymore.
+    EXPECT_EQ(mlir_text.find("tensor.pad"), std::string::npos) << mlir_text;
+    EXPECT_EQ(mlir_text.find("tensor.yield"), std::string::npos) << mlir_text;
+    // Padded shape (1x1x32x32) must not appear because we no longer materialize
+    // a padded tensor on the frontend side.
+    EXPECT_EQ(mlir_text.find("tensor<1x1x32x32xf32>"), std::string::npos)
         << mlir_text;
-    // Pad with NCHW low/high layout puts spatial pads on dims 2/3 only.
-    EXPECT_NE(mlir_text.find("tensor.pad"), std::string::npos) << mlir_text;
-    EXPECT_NE(mlir_text.find("low[0, 0, 2, 2]"), std::string::npos)
-        << mlir_text;
-    EXPECT_NE(mlir_text.find("high[0, 0, 2, 2]"), std::string::npos)
-        << mlir_text;
-    EXPECT_NE(mlir_text.find("tensor.yield"), std::string::npos) << mlir_text;
-    // Padded type: 28 + 2 + 2 = 32 in spatial dims.
-    EXPECT_NE(mlir_text.find("tensor<1x1x32x32xf32>"), std::string::npos)
-        << mlir_text;
-    // The conv itself runs on the padded tensor.
-    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw"), std::string::npos)
+    // Conv carries an explicit {pads = [2, 2, 2, 2]} attribute on the same
+    // line as the op.
+    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]} "
+                             "ins(%arg0, %cst0 : tensor<1x1x28x28xf32>, "
+                             "tensor<8x1x5x5xf32>)"),
+              std::string::npos)
         << mlir_text;
     // Output type unchanged (1x8x28x28).
     EXPECT_NE(mlir_text.find("tensor<1x8x28x28xf32>"), std::string::npos)
+        << mlir_text;
+}
+
+TEST(MlirEmitter, ConvWithZeroPadsOmitsPadsAttribute)
+{
+    // Default unpadded Conv must keep the existing one-liner spelling without
+    // any {pads = ...} clause, so the backend's existing regex (which has the
+    // attribute group as optional) keeps matching it byte-for-byte.
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    const std::string model_path =
+        std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
+    ASSERT_TRUE(
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        << "import failed: " << error;
+
+    std::string mlir_text;
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(graph, mlir_text, error))
+        << error;
+
+    EXPECT_EQ(mlir_text.find("{pads ="), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw ins("),
+              std::string::npos)
         << mlir_text;
 }
 
@@ -1047,8 +1073,12 @@ TEST(MlirEmitter, MnistFullGraphEmitsSuccessfully)
                              "tensor<1x1x28x28xf32>) -> tensor<1x10xf32>"),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("tensor.pad"), std::string::npos) << mlir_text;
-    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw"), std::string::npos)
+    // No tensor.pad: padded Conv is emitted as a single op with {pads = [...]}
+    // so the backend's regex parser does not need region-body support.
+    EXPECT_EQ(mlir_text.find("tensor.pad"), std::string::npos) << mlir_text;
+    EXPECT_EQ(mlir_text.find("tensor.yield"), std::string::npos) << mlir_text;
+    EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]}"),
+              std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("linalg.pooling_nchw_max"), std::string::npos)
         << mlir_text;
