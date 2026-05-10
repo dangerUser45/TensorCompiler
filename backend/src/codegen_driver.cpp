@@ -318,7 +318,7 @@ private:
             case tc::backend::FrontendMlirOpKind::kMatMul:
                 return EmitMatMul(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kReshape:
-                return Fail(diagnostic, "reshape lowering is not implemented");
+                return EmitReshape(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kMaxPoolNchw:
                 return Fail(diagnostic, "MaxPool lowering is not implemented");
             case tc::backend::FrontendMlirOpKind::kTranspose:
@@ -474,6 +474,27 @@ private:
                 StoreElement(output, row * n + col, acc);
             }
         }
+        return true;
+    }
+
+    bool EmitReshape(const tc::backend::FrontendMlirOp& op,
+                     tc::backend::BackendDiagnostic& diagnostic)
+    {
+        if (op.operands.size() != 1) {
+            return Fail(diagnostic, "reshape expects one input");
+        }
+        const TensorStorage* input = FindValue(op.operands[0]);
+        if (!input) {
+            return Fail(diagnostic, "unknown reshape input " + op.operands[0]);
+        }
+        if (input->type.element_count() != op.result_type.element_count()) {
+            return Fail(diagnostic,
+                        "reshape input and output element counts must match");
+        }
+
+        TensorStorage output = *input;
+        output.type = op.result_type;
+        values_[op.result] = std::move(output);
         return true;
     }
 

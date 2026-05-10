@@ -25,6 +25,15 @@ module {
 }
 )mlir";
 
+const char* kReshapeMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<2x3xf32>) -> tensor<3x2xf32> {
+    %t0 = tensor.reshape %arg0 : tensor<2x3xf32> to tensor<3x2xf32>
+    return %t0 : tensor<3x2xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -32,6 +41,17 @@ bool Expect(bool condition, const std::string& message)
         return false;
     }
     return true;
+}
+
+bool ValidateLlvmIr(const std::string& llvm_ir,
+                    const std::filesystem::path& ir_path)
+{
+    {
+        std::ofstream out(ir_path, std::ios::out | std::ios::trunc);
+        out << llvm_ir;
+    }
+    const std::string validate_cmd = "llc -filetype=null " + ir_path.string();
+    return std::system(validate_cmd.c_str()) == 0;
 }
 
 } // namespace
@@ -67,16 +87,30 @@ int main()
         return 1;
     }
 
-    const std::filesystem::path ir_path =
-        std::filesystem::temp_directory_path() / "tc_codegen_driver_test.ll";
-    {
-        std::ofstream out(ir_path, std::ios::out | std::ios::trunc);
-        out << llvm_ir;
-    }
-    const std::string validate_cmd = "llc -filetype=null " + ir_path.string();
-    if (!Expect(std::system(validate_cmd.c_str()) == 0,
+    if (!Expect(ValidateLlvmIr(llvm_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_driver_test.ll"),
                 "llc must accept generated LLVM IR")) {
         std::cerr << llvm_ir << '\n';
+        return 1;
+    }
+
+    std::string reshape_ir;
+    if (!Expect(
+            tc::backend::EmitLlvmIrFromMlirText(
+                kReshapeMlir, "reshape.mlir", {}, {}, reshape_ir, diagnostic),
+            "reshape MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(reshape_ir.find("tensor.reshape") == std::string::npos,
+                "LLVM IR must not contain tensor.reshape") ||
+        !Expect(ValidateLlvmIr(reshape_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_reshape_test.ll"),
+                "llc must accept reshape LLVM IR")) {
+        std::cerr << reshape_ir << '\n';
         return 1;
     }
 
