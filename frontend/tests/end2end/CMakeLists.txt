@@ -156,7 +156,7 @@ add_test(
           --model ${PROJECT_SOURCE_DIR}/models/mnist-8.onnx
           --expect "func.func @tc_model(%arg0: tensor<1x1x28x28xf32>) -> tensor<1x10xf32>"
           --expect "linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]}"
-          --expect linalg.pooling_nchw_max
+          --expect "linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]}"
           --expect linalg.matmul
           --expect tensor.reshape
           --expect arith.maximumf

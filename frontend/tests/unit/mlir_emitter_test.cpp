@@ -960,8 +960,12 @@ TEST(MlirEmitter, MaxPoolGraphEmitsLinalgPoolingNchw)
               std::string::npos)
         << mlir_text;
 
-    // Check MaxPool operation uses linalg.pooling_nchw_max
-    EXPECT_NE(mlir_text.find("linalg.pooling_nchw_max"), std::string::npos)
+    // Check MaxPool operation uses linalg.pooling_nchw_max with explicit
+    // kernel/strides attributes.
+    EXPECT_NE(
+        mlir_text.find(
+            "linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]}"),
+        std::string::npos)
         << mlir_text;
 
     // Check tensor.empty for output initialization
@@ -1080,7 +1084,10 @@ TEST(MlirEmitter, MnistFullGraphEmitsSuccessfully)
     EXPECT_NE(mlir_text.find("linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]}"),
               std::string::npos)
         << mlir_text;
-    EXPECT_NE(mlir_text.find("linalg.pooling_nchw_max"), std::string::npos)
+    EXPECT_NE(
+        mlir_text.find(
+            "linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]}"),
+        std::string::npos)
         << mlir_text;
     EXPECT_NE(mlir_text.find("linalg.matmul"), std::string::npos) << mlir_text;
     EXPECT_NE(mlir_text.find("tensor.reshape"), std::string::npos) << mlir_text;

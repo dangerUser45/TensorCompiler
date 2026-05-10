@@ -709,6 +709,24 @@ bool ConvHasZeroPads(const tc::frontend::Node& node)
     return IntAttrEquals(node, "pads", { 0, 0, 0, 0 });
 }
 
+bool ReadIntAttr(const tc::frontend::Node& node,
+                 std::string_view name,
+                 std::size_t expected_size,
+                 std::vector<int64_t>& out_values)
+{
+    out_values.clear();
+    const auto* attr = FindAttr(node, name);
+    if (!attr || attr->get_data_type().id != tc::frontend::DataID::INT64) {
+        return false;
+    }
+    const auto& values = attr->get_values<int64_t>();
+    if (values.size() != expected_size) {
+        return false;
+    }
+    out_values = values;
+    return true;
+}
+
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
                     std::string& out_mlir_text,
                     std::string& out_error)
@@ -999,13 +1017,25 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 const std::string result_type =
                     ResolveTensorType(output_name, output_ty);
                 const std::string init = NextTemp();
+                std::vector<int64_t> kernel_shape;
+                std::vector<int64_t> strides;
+                if (!ReadIntAttr(node, "kernel_shape", 2, kernel_shape) ||
+                    !ReadIntAttr(node, "strides", 2, strides)) {
+                    out_error = "ERROR: unsupported MaxPool attributes for "
+                                "production MLIR; kernel_shape and strides "
+                                "must be INT64[2]";
+                    return false;
+                }
                 out << "    " << init << " = tensor.empty() : " << result_type
                     << '\n';
                 result = MlirValue{ NextTemp(), result_type };
                 out << "    " << result->name
-                    << " = linalg.pooling_nchw_max ins(" << input.name << " : "
-                    << input.type << ") outs(" << init << " : " << result_type
-                    << ") -> " << result_type << '\n';
+                    << " = linalg.pooling_nchw_max {kernel = ["
+                    << kernel_shape[0] << ", " << kernel_shape[1]
+                    << "], strides = [" << strides[0] << ", " << strides[1]
+                    << "]} ins(" << input.name << " : " << input.type
+                    << ") outs(" << init << " : " << result_type << ") -> "
+                    << result_type << '\n';
                 break;
             }
 
