@@ -271,19 +271,86 @@ TEST(ImporterOpKind, MaxPoolSetsMaxPoolKind)
               tc::frontend::OpKind::kMaxPool);
 }
 
-TEST(ImporterOpKind, MnistModelFailsOnLaterUnsupportedOperator)
+TEST(ImporterOpKind, MnistModelImportsAllSupportedOperators)
 {
     ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
-    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("mnist-8.onnx").string(), model, graph, error));
-    EXPECT_NE(error.find("op 'Conv' supports only auto_pad=NOTSET"),
-              std::string::npos)
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        ModelPath("mnist-8.onnx").string(), model, graph, error))
         << error;
-    EXPECT_EQ(error.find("unsupported operator: Reshape"), std::string::npos)
+
+    // The MNIST graph contains Reshape, Conv (with auto_pad=SAME_UPPER
+    // normalized to explicit pads), Add, Relu, MaxPool, MatMul.
+    bool has_conv = false;
+    bool has_maxpool = false;
+    bool has_reshape = false;
+    bool has_matmul = false;
+    for (const auto& node_ptr : graph.get_nodes()) {
+        ASSERT_NE(node_ptr, nullptr);
+        switch (node_ptr->get_op_kind()) {
+            case tc::frontend::OpKind::kConv:
+                has_conv = true;
+                break;
+            case tc::frontend::OpKind::kMaxPool:
+                has_maxpool = true;
+                break;
+            case tc::frontend::OpKind::kReshape:
+                has_reshape = true;
+                break;
+            case tc::frontend::OpKind::kMatMul:
+                has_matmul = true;
+                break;
+            default:
+                break;
+        }
+    }
+    EXPECT_TRUE(has_conv);
+    EXPECT_TRUE(has_maxpool);
+    EXPECT_TRUE(has_reshape);
+    EXPECT_TRUE(has_matmul);
+}
+
+TEST(ImporterOpKind, MnistConvNodesNormalizeSameUpperToExplicitPads)
+{
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        ModelPath("mnist-8.onnx").string(), model, graph, error))
         << error;
+
+    // Both MNIST Convs (kernel=5x5, stride=1, dilation=1, SAME_UPPER) must
+    // normalize to pads=[2,2,2,2] with auto_pad="NOTSET".
+    int conv_count = 0;
+    for (const auto& node_ptr : graph.get_nodes()) {
+        ASSERT_NE(node_ptr, nullptr);
+        if (node_ptr->get_op_kind() != tc::frontend::OpKind::kConv) {
+            continue;
+        }
+        ++conv_count;
+        const tc::frontend::Attribute* pads_attr = nullptr;
+        const tc::frontend::Attribute* auto_pad_attr = nullptr;
+        for (const auto& attr : node_ptr->get_attrs()) {
+            if (!attr) {
+                continue;
+            }
+            if (attr->get_name() == "pads") {
+                pads_attr = attr.get();
+            } else if (attr->get_name() == "auto_pad") {
+                auto_pad_attr = attr.get();
+            }
+        }
+        ASSERT_NE(pads_attr, nullptr);
+        EXPECT_EQ(pads_attr->get_values<int64_t>(),
+                  (std::vector<int64_t>{ 2, 2, 2, 2 }));
+        ASSERT_NE(auto_pad_attr, nullptr);
+        EXPECT_EQ(auto_pad_attr->get_values<std::string>(),
+                  (std::vector<std::string>{ "NOTSET" }));
+    }
+    EXPECT_EQ(conv_count, 2);
 }
 
 TEST(ImporterOpKind, UnsupportedModelStillFails)

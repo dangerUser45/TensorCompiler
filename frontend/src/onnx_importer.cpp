@@ -486,10 +486,70 @@ bool ValidateIntAttrLength(const Attribute& attr,
     return true;
 }
 
+bool ComputeSameUpperPads(const std::vector<int64_t>* input_shape,
+                          const std::vector<int64_t>& kernel_shape,
+                          const std::vector<int64_t>& strides,
+                          const std::vector<int64_t>& dilations,
+                          std::vector<int64_t>& out_pads,
+                          std::string& out_error,
+                          const std::string& node_context)
+{
+    out_pads.clear();
+
+    const bool unit_stride =
+        strides.size() == 2 && strides[0] == 1 && strides[1] == 1;
+    const bool unit_dilation =
+        dilations.size() == 2 && dilations[0] == 1 && dilations[1] == 1;
+
+    if (unit_stride && unit_dilation) {
+        // For stride=1 and dilation=1, SAME_UPPER pads are independent of
+        // input spatial dims: total_pad = kernel - 1. SAME_UPPER places the
+        // extra pad at the end (bottom/right) when total is odd.
+        const int64_t pad_h = kernel_shape[0] > 0 ? kernel_shape[0] - 1 : 0;
+        const int64_t pad_w = kernel_shape[1] > 0 ? kernel_shape[1] - 1 : 0;
+        out_pads = {
+            pad_h / 2, pad_w / 2, pad_h - pad_h / 2, pad_w - pad_w / 2
+        };
+        return true;
+    }
+
+    if (input_shape == nullptr || input_shape->size() != 4) {
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " op 'Conv' auto_pad=SAME_UPPER requires rank-4 "
+                            "static input shape for non-unit stride/dilation");
+    }
+    if ((*input_shape)[2] < 0 || (*input_shape)[3] < 0) {
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " op 'Conv' auto_pad=SAME_UPPER requires static "
+                            "spatial dimensions");
+    }
+
+    auto compute = [](int64_t in,
+                      int64_t kernel,
+                      int64_t stride,
+                      int64_t dilation) -> int64_t {
+        const int64_t out = (in + stride - 1) / stride; // ceil(in/stride)
+        const int64_t effective_kernel = (kernel - 1) * dilation + 1;
+        const int64_t total = (out - 1) * stride + effective_kernel - in;
+        return total > 0 ? total : 0;
+    };
+    const int64_t total_h =
+        compute((*input_shape)[2], kernel_shape[0], strides[0], dilations[0]);
+    const int64_t total_w =
+        compute((*input_shape)[3], kernel_shape[1], strides[1], dilations[1]);
+    out_pads = {
+        total_h / 2, total_w / 2, total_h - total_h / 2, total_w - total_w / 2
+    };
+    return true;
+}
+
 bool NormalizeConvAttributes(Node::AttrVecT& attrs,
                              std::string& out_error,
                              const std::string& node_context,
-                             const std::vector<int64_t>* inferred_kernel_shape)
+                             const std::vector<int64_t>* inferred_kernel_shape,
+                             const std::vector<int64_t>* input_shape)
 {
     std::unordered_set<std::string> seen_names;
     seen_names.reserve(attrs.size());
@@ -567,10 +627,13 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
                         " op 'Conv' attribute 'auto_pad' must be STRING");
             }
             const auto& value = attrs[i]->get_values<std::string>().front();
-            if (value != "NOTSET") {
+            if (value != "NOTSET" && value != "SAME_UPPER") {
                 return SetError(out_error,
                                 "ERROR: " + node_context +
-                                    " op 'Conv' supports only auto_pad=NOTSET");
+                                    " op 'Conv' supports only "
+                                    "auto_pad in {NOTSET, "
+                                    "SAME_UPPER}, got " +
+                                    value);
             }
             continue;
         }
@@ -593,9 +656,6 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
     if (!has_strides) {
         attrs.push_back(MakeIntAttr("strides", { 1, 1 }));
     }
-    if (!has_pads) {
-        attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
-    }
     if (!has_dilations) {
         attrs.push_back(MakeIntAttr("dilations", { 1, 1 }));
     }
@@ -605,6 +665,61 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
     if (!has_auto_pad) {
         attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
     }
+
+    // Normalize auto_pad=SAME_UPPER to explicit pads. After normalization the
+    // canonical IR form always carries auto_pad="NOTSET" with explicit pads.
+    Attribute* auto_pad_attr = nullptr;
+    Attribute* kernel_attr = nullptr;
+    Attribute* strides_attr = nullptr;
+    Attribute* dilations_attr = nullptr;
+    for (auto& attr : attrs) {
+        if (!attr) {
+            continue;
+        }
+        if (attr->get_name() == "auto_pad") {
+            auto_pad_attr = attr.get();
+        } else if (attr->get_name() == "kernel_shape") {
+            kernel_attr = attr.get();
+        } else if (attr->get_name() == "strides") {
+            strides_attr = attr.get();
+        } else if (attr->get_name() == "dilations") {
+            dilations_attr = attr.get();
+        }
+    }
+
+    const std::string auto_pad_value =
+        auto_pad_attr ? auto_pad_attr->get_values<std::string>().front()
+                      : std::string("NOTSET");
+
+    if (auto_pad_value == "SAME_UPPER") {
+        if (has_pads) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Conv' must not set 'pads' when "
+                                "auto_pad='SAME_UPPER'");
+        }
+        if (!kernel_attr || !strides_attr || !dilations_attr) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'Conv' SAME_UPPER normalization missing "
+                                "kernel/strides/dilations");
+        }
+        std::vector<int64_t> normalized_pads;
+        if (!ComputeSameUpperPads(input_shape,
+                                  kernel_attr->get_values<int64_t>(),
+                                  strides_attr->get_values<int64_t>(),
+                                  dilations_attr->get_values<int64_t>(),
+                                  normalized_pads,
+                                  out_error,
+                                  node_context)) {
+            return false;
+        }
+        attrs.push_back(MakeIntAttr("pads", std::move(normalized_pads)));
+        auto_pad_attr->set_values<std::string>({ "NOTSET" });
+    } else if (!has_pads) {
+        attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
+    }
+
     return true;
 }
 
@@ -778,11 +893,12 @@ bool NormalizeNodeAttributes(OpKind op_kind,
                              Node::AttrVecT& attrs,
                              std::string& out_error,
                              const std::string& node_context,
-                             const std::vector<int64_t>* inferred_kernel_shape)
+                             const std::vector<int64_t>* inferred_kernel_shape,
+                             const std::vector<int64_t>* input_shape)
 {
     if (op_kind == OpKind::kConv) {
         return NormalizeConvAttributes(
-            attrs, out_error, node_context, inferred_kernel_shape);
+            attrs, out_error, node_context, inferred_kernel_shape, input_shape);
     }
     if (op_kind == OpKind::kMaxPool) {
         return NormalizeMaxPoolAttributes(attrs, out_error, node_context);
@@ -854,7 +970,9 @@ bool ParseNode(const ::onnx::NodeProto& src,
                std::string& out_error,
                int node_index,
                const std::unordered_map<std::string, std::vector<int64_t>>&
-                   initializer_shapes)
+                   initializer_shapes,
+               const std::unordered_map<std::string, std::vector<int64_t>>&
+                   value_info_shapes)
 {
     const std::string node_context = BuildNodeContext(src, node_index);
     const std::string& op_type = src.op_type();
@@ -1067,6 +1185,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
     }
     std::vector<int64_t> inferred_kernel_shape;
     const std::vector<int64_t>* inferred_kernel_shape_ptr = nullptr;
+    const std::vector<int64_t>* input_shape_ptr = nullptr;
     if (op_kind == OpKind::kConv && src.input_size() >= 2) {
         const auto weight_it = initializer_shapes.find(src.input(1));
         if (weight_it != initializer_shapes.end() &&
@@ -1075,12 +1194,17 @@ bool ParseNode(const ::onnx::NodeProto& src,
                                       weight_it->second[3] };
             inferred_kernel_shape_ptr = &inferred_kernel_shape;
         }
+        const auto input_it = value_info_shapes.find(src.input(0));
+        if (input_it != value_info_shapes.end()) {
+            input_shape_ptr = &input_it->second;
+        }
     }
     if (!NormalizeNodeAttributes(op_kind,
                                  attrs,
                                  out_error,
                                  node_context,
-                                 inferred_kernel_shape_ptr)) {
+                                 inferred_kernel_shape_ptr,
+                                 input_shape_ptr)) {
         return false;
     }
     node->set_attr(std::move(attrs));
@@ -1127,10 +1251,39 @@ bool BuildNodes(const ::onnx::GraphProto& g,
         initializer_shapes[init.name()] = std::move(shape);
     }
 
+    // Collect static shapes for graph inputs, intermediate value_info, and
+    // outputs so that auto_pad=SAME_UPPER normalization can read input shapes
+    // for non-unit stride/dilation cases.
+    std::unordered_map<std::string, std::vector<int64_t>> value_info_shapes =
+        initializer_shapes;
+    auto collect_value_info =
+        [&value_info_shapes](const ::onnx::ValueInfoProto& vi) {
+            if (vi.name().empty()) {
+                return;
+            }
+            std::vector<int64_t> shape;
+            std::string ignored_error;
+            ParseDimsFromValueInfo(vi, shape, ignored_error);
+            value_info_shapes[vi.name()] = std::move(shape);
+        };
+    for (int i = 0; i < g.input_size(); ++i) {
+        collect_value_info(g.input(i));
+    }
+    for (int i = 0; i < g.value_info_size(); ++i) {
+        collect_value_info(g.value_info(i));
+    }
+    for (int i = 0; i < g.output_size(); ++i) {
+        collect_value_info(g.output(i));
+    }
+
     out_nodes.reserve(g.node_size() * 2);
     for (int i = 0; i < g.node_size(); ++i) {
-        if (!ParseNode(
-                g.node(i), out_nodes, out_error, i, initializer_shapes)) {
+        if (!ParseNode(g.node(i),
+                       out_nodes,
+                       out_error,
+                       i,
+                       initializer_shapes,
+                       value_info_shapes)) {
             return false;
         }
     }

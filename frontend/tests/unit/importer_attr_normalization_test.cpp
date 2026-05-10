@@ -347,7 +347,115 @@ TEST(ImporterAttrNormalization, ConvUnsupportedAutoPadFails)
         auto* attr = node.add_attribute();
         attr->set_name("auto_pad");
         attr->set_type(::onnx::AttributeProto_AttributeType_STRING);
-        attr->set_s("SAME_UPPER");
+        attr->set_s("SAME_LOWER");
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, ConvAutoPadValidRejected)
+{
+    const auto model = BuildConvModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("auto_pad");
+        attr->set_type(::onnx::AttributeProto_AttributeType_STRING);
+        attr->set_s("VALID");
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, ConvAutoPadSameUpperNormalizesToExplicitPads)
+{
+    // Build a Conv equivalent to MNIST Convolution28: kernel=5x5, stride=1,
+    // dilations=1, auto_pad=SAME_UPPER. Expected normalized pads = [2,2,2,2].
+    const auto model = BuildConvModel([](::onnx::NodeProto& node) {
+        node.clear_attribute();
+
+        auto* kernel = node.add_attribute();
+        kernel->set_name("kernel_shape");
+        kernel->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        kernel->add_ints(5);
+        kernel->add_ints(5);
+
+        auto* strides = node.add_attribute();
+        strides->set_name("strides");
+        strides->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        strides->add_ints(1);
+        strides->add_ints(1);
+
+        auto* dilations = node.add_attribute();
+        dilations->set_name("dilations");
+        dilations->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        dilations->add_ints(1);
+        dilations->add_ints(1);
+
+        auto* auto_pad = node.add_attribute();
+        auto_pad->set_name("auto_pad");
+        auto_pad->set_type(::onnx::AttributeProto_AttributeType_STRING);
+        auto_pad->set_s("SAME_UPPER");
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    const auto& node = *graph.get_nodes()[0];
+    EXPECT_EQ(node.get_op_kind(), tc::frontend::OpKind::kConv);
+
+    ASSERT_NE(FindAttr(node, "pads"), nullptr);
+    EXPECT_EQ(FindAttr(node, "pads")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 2, 2, 2, 2 }));
+    ASSERT_NE(FindAttr(node, "auto_pad"), nullptr);
+    EXPECT_EQ(FindAttr(node, "auto_pad")->get_values<std::string>(),
+              (std::vector<std::string>{ "NOTSET" }));
+}
+
+TEST(ImporterAttrNormalization, ConvAutoPadSameUpperWithExplicitPadsRejected)
+{
+    // ONNX semantics: if auto_pad != NOTSET, pads MUST NOT be set.
+    const auto model = BuildConvModel([](::onnx::NodeProto& node) {
+        node.clear_attribute();
+
+        auto* kernel = node.add_attribute();
+        kernel->set_name("kernel_shape");
+        kernel->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        kernel->add_ints(3);
+        kernel->add_ints(3);
+
+        auto* pads = node.add_attribute();
+        pads->set_name("pads");
+        pads->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        pads->add_ints(1);
+        pads->add_ints(1);
+        pads->add_ints(1);
+        pads->add_ints(1);
+
+        auto* auto_pad = node.add_attribute();
+        auto_pad->set_name("auto_pad");
+        auto_pad->set_type(::onnx::AttributeProto_AttributeType_STRING);
+        auto_pad->set_s("SAME_UPPER");
     });
     const TempModelFile temp_model(model);
 
