@@ -277,6 +277,28 @@ bool ParseOperationLine(const std::string& line,
         return ParseTensorType(match[5].str(), op.result_type);
     }
 
+    static const std::regex kReshapeRegex(
+        R"(^(%[A-Za-z0-9_.$]+)\s*=\s*tensor\.reshape\s+(%[A-Za-z0-9_.$]+)\s*:\s*tensor<[^>]+>\s+to\s+(tensor<[^>]+>)$)");
+    if (std::regex_match(line, match, kReshapeRegex)) {
+        op.kind = tc::backend::FrontendMlirOpKind::kReshape;
+        op.result = match[1].str();
+        op.operands = { match[2].str() };
+        return ParseTensorType(match[3].str(), op.result_type);
+    }
+
+    static const std::regex kMaxPoolRegex(
+        R"(^(%[A-Za-z0-9_.$]+)\s*=\s*linalg\.pooling_nchw_max\s+\{kernel\s*=\s*\[([^\]]*)\],\s*strides\s*=\s*\[([^\]]*)\]\}\s+ins\((%[A-Za-z0-9_.$]+)\s*:\s*tensor<[^>]+>\)\s+outs\((%[A-Za-z0-9_.$]+)\s*:\s*(tensor<[^>]+>)\)\s*->\s*tensor<[^>]+>$)");
+    if (std::regex_match(line, match, kMaxPoolRegex)) {
+        op.kind = tc::backend::FrontendMlirOpKind::kMaxPoolNchw;
+        op.result = match[1].str();
+        op.operands = { match[4].str(), match[5].str() };
+        return ParseIntList(match[2].str(), op.kernel_shape) &&
+               op.kernel_shape.size() == 2 &&
+               ParseIntList(match[3].str(), op.strides) &&
+               op.strides.size() == 2 &&
+               ParseTensorType(match[6].str(), op.result_type);
+    }
+
     static const std::regex kTransposeRegex(
         R"(^(%[A-Za-z0-9_.$]+)\s*=\s*linalg\.transpose\s+ins\((%[A-Za-z0-9_.$]+)\s*:\s*tensor<[^>]+>\)\s+outs\((%[A-Za-z0-9_.$]+)\s*:\s*(tensor<[^>]+>)\)\s+permutation\s*=\s*\[([^\]]*)\]$)");
     if (std::regex_match(line, match, kTransposeRegex)) {
@@ -288,12 +310,17 @@ bool ParseOperationLine(const std::string& line,
     }
 
     static const std::regex kConvRegex(
-        R"(^(%[A-Za-z0-9_.$]+)\s*=\s*linalg\.conv_2d_nchw_fchw\s+ins\((%[A-Za-z0-9_.$]+),\s*(%[A-Za-z0-9_.$]+)\s*:\s*tensor<[^>]+>,\s*tensor<[^>]+>\)\s+outs\((%[A-Za-z0-9_.$]+)\s*:\s*(tensor<[^>]+>)\)\s*->\s*tensor<[^>]+>$)");
+        R"(^(%[A-Za-z0-9_.$]+)\s*=\s*linalg\.conv_2d_nchw_fchw(?:\s+\{pads\s*=\s*\[([^\]]*)\]\})?\s+ins\((%[A-Za-z0-9_.$]+),\s*(%[A-Za-z0-9_.$]+)\s*:\s*tensor<[^>]+>,\s*tensor<[^>]+>\)\s+outs\((%[A-Za-z0-9_.$]+)\s*:\s*(tensor<[^>]+>)\)\s*->\s*tensor<[^>]+>$)");
     if (std::regex_match(line, match, kConvRegex)) {
         op.kind = tc::backend::FrontendMlirOpKind::kConv2DNchwFchw;
         op.result = match[1].str();
-        op.operands = { match[2].str(), match[3].str(), match[4].str() };
-        return ParseTensorType(match[5].str(), op.result_type);
+        op.operands = { match[3].str(), match[4].str(), match[5].str() };
+        op.pads = { 0, 0, 0, 0 };
+        if (match[2].matched &&
+            (!ParseIntList(match[2].str(), op.pads) || op.pads.size() != 4)) {
+            return false;
+        }
+        return ParseTensorType(match[6].str(), op.result_type);
     }
 
     static const std::regex kReturnRegex(

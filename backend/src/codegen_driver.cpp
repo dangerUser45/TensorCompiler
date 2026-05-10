@@ -317,6 +317,10 @@ private:
                 return EmitElementwise(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kMatMul:
                 return EmitMatMul(op, diagnostic);
+            case tc::backend::FrontendMlirOpKind::kReshape:
+                return Fail(diagnostic, "reshape lowering is not implemented");
+            case tc::backend::FrontendMlirOpKind::kMaxPoolNchw:
+                return Fail(diagnostic, "MaxPool lowering is not implemented");
             case tc::backend::FrontendMlirOpKind::kTranspose:
                 return EmitTranspose(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kConv2DNchwFchw:
