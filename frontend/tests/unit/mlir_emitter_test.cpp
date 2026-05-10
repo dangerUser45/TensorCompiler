@@ -243,6 +243,42 @@ tc::frontend::Graph MakeSingleReshapeGraph()
     return graph;
 }
 
+tc::frontend::Graph MakeSingleMaxPoolGraph()
+{
+    tc::frontend::Graph graph;
+    graph.set_name("maxpool_graph");
+
+    tc::frontend::Graph::TensVecT inputs;
+    inputs.push_back(
+        MakeTensor("input", { 1, 1, 4, 4 }, tc::frontend::DataID::FLOAT));
+    graph.set_input_tensors(std::move(inputs));
+
+    tc::frontend::Graph::TensVecT outputs;
+    outputs.push_back(
+        MakeTensor("output", { 1, 1, 2, 2 }, tc::frontend::DataID::FLOAT));
+    graph.set_output_tensors(std::move(outputs));
+
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("maxpool_0");
+    node->set_name_op("MaxPool");
+    node->set_op_kind(tc::frontend::OpKind::kMaxPool);
+    node->set_inputs({ "input" });
+    node->set_outputs({ "output" });
+
+    // Add MaxPool attributes
+    tc::frontend::Node::AttrVecT attrs;
+    attrs.push_back(MakeIntAttr("kernel_shape", { 2, 2 }));
+    attrs.push_back(MakeIntAttr("strides", { 2, 2 }));
+    attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
+    node->set_attr(std::move(attrs));
+
+    tc::frontend::Graph::NodeVecT nodes;
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    return graph;
+}
+
 void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
                          const std::string& name,
                          const std::vector<int64_t>& shape_dims)
@@ -794,6 +830,47 @@ TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
     ASSERT_NE(empty_pos, std::string::npos) << mlir_text;
     ASSERT_NE(matmul_pos, std::string::npos) << mlir_text;
     EXPECT_LT(empty_pos, matmul_pos) << mlir_text;
+}
+
+TEST(MlirEmitter, MaxPoolGraphEmitsLinalgPoolingNchw)
+{
+    const auto graph = MakeSingleMaxPoolGraph();
+    ASSERT_EQ(graph.get_input_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_output_tensors().size(), 1u);
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kMaxPool);
+    ASSERT_EQ(graph.get_nodes()[0]->get_inputs().size(), 1u);
+    ASSERT_EQ(graph.get_nodes()[0]->get_outputs().size(), 1u);
+
+    std::string mlir_text;
+    std::string error;
+
+    ASSERT_TRUE(
+        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+        << error;
+    EXPECT_TRUE(error.empty());
+    EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
+                             "implemented yet."),
+              std::string::npos)
+        << mlir_text;
+
+    // Check function signature
+    EXPECT_NE(mlir_text.find("func.func @tc_model(%arg0: tensor<1x1x4x4xf32>) "
+                             "-> tensor<1x1x2x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+
+    // Check MaxPool operation uses linalg.pooling_nchw_max
+    EXPECT_NE(mlir_text.find("linalg.pooling_nchw_max"), std::string::npos)
+        << mlir_text;
+
+    // Check tensor.empty for output initialization
+    EXPECT_NE(mlir_text.find("tensor.empty() : tensor<1x1x2x2xf32>"),
+              std::string::npos)
+        << mlir_text;
+
+    EXPECT_NE(mlir_text.find("return %"), std::string::npos) << mlir_text;
 }
 
 TEST(MlirEmitter, ReshapeGraphEmitsTensorReshape)

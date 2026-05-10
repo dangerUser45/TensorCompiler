@@ -117,7 +117,8 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             kind != tc::frontend::OpKind::kMul &&
             kind != tc::frontend::OpKind::kConv &&
             kind != tc::frontend::OpKind::kReshape &&
-            kind != tc::frontend::OpKind::kMatMul) {
+            kind != tc::frontend::OpKind::kMatMul &&
+            kind != tc::frontend::OpKind::kMaxPool) {
             return false;
         }
         std::size_t expected_inputs = 0;
@@ -132,6 +133,9 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             case tc::frontend::OpKind::kReshape:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
+                break;
+            case tc::frontend::OpKind::kMaxPool:
+                expected_inputs = 1;
                 break;
             case tc::frontend::OpKind::kUnknown:
                 return false;
@@ -598,6 +602,21 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                         << input.name << " : " << input.type << " to "
                         << result_type << '\n';
                 }
+                break;
+            }
+
+            case tc::frontend::OpKind::kMaxPool: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                out << "    " << init << " = tensor.empty() : " << result_type
+                    << '\n';
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name
+                    << " = linalg.pooling_nchw_max ins(" << input.name << " : "
+                    << input.type << ") outs(" << init << " : " << result_type
+                    << ") -> " << result_type << '\n';
                 break;
             }
 
