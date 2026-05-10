@@ -321,7 +321,7 @@ private:
             case tc::backend::FrontendMlirOpKind::kReshape:
                 return EmitReshape(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kMaxPoolNchw:
-                return Fail(diagnostic, "MaxPool lowering is not implemented");
+                return EmitMaxPool(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kTranspose:
                 return EmitTranspose(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kConv2DNchwFchw:
@@ -496,6 +496,87 @@ private:
         TensorStorage output = *input;
         output.type = op.result_type;
         values_[op.result] = std::move(output);
+        return true;
+    }
+
+    bool EmitMaxPool(const tc::backend::FrontendMlirOp& op,
+                     tc::backend::BackendDiagnostic& diagnostic)
+    {
+        if (op.operands.empty()) {
+            return Fail(diagnostic, "MaxPool expects an input");
+        }
+        const TensorStorage* input = FindValue(op.operands[0]);
+        if (!input || input->type.shape.size() != 4 ||
+            op.result_type.shape.size() != 4) {
+            return Fail(diagnostic, "MaxPool expects rank-4 NCHW tensors");
+        }
+        if (op.kernel_shape.size() != 2 || op.strides.size() != 2 ||
+            op.kernel_shape[0] <= 0 || op.kernel_shape[1] <= 0 ||
+            op.strides[0] <= 0 || op.strides[1] <= 0) {
+            return Fail(diagnostic,
+                        "MaxPool expects positive 2D kernel and strides");
+        }
+
+        const std::size_t n_size =
+            static_cast<std::size_t>(op.result_type.shape[0]);
+        const std::size_t c_size =
+            static_cast<std::size_t>(op.result_type.shape[1]);
+        const std::size_t out_h =
+            static_cast<std::size_t>(op.result_type.shape[2]);
+        const std::size_t out_w =
+            static_cast<std::size_t>(op.result_type.shape[3]);
+        const std::size_t in_c = static_cast<std::size_t>(input->type.shape[1]);
+        const std::size_t in_h = static_cast<std::size_t>(input->type.shape[2]);
+        const std::size_t in_w = static_cast<std::size_t>(input->type.shape[3]);
+        const std::size_t kernel_h =
+            static_cast<std::size_t>(op.kernel_shape[0]);
+        const std::size_t kernel_w =
+            static_cast<std::size_t>(op.kernel_shape[1]);
+        const std::size_t stride_h = static_cast<std::size_t>(op.strides[0]);
+        const std::size_t stride_w = static_cast<std::size_t>(op.strides[1]);
+        if (c_size != in_c ||
+            (out_h > 0 && (out_h - 1) * stride_h + kernel_h > in_h) ||
+            (out_w > 0 && (out_w - 1) * stride_w + kernel_w > in_w)) {
+            return Fail(diagnostic, "MaxPool output shape is incompatible");
+        }
+
+        TensorStorage output = CreateBuffer(op.result, op.result_type);
+        for (std::size_t n = 0; n < n_size; ++n) {
+            for (std::size_t c = 0; c < c_size; ++c) {
+                for (std::size_t oh = 0; oh < out_h; ++oh) {
+                    for (std::size_t ow = 0; ow < out_w; ++ow) {
+                        const std::size_t base_h = oh * stride_h;
+                        const std::size_t base_w = ow * stride_w;
+                        std::string acc;
+                        for (std::size_t kh = 0; kh < kernel_h; ++kh) {
+                            for (std::size_t kw = 0; kw < kernel_w; ++kw) {
+                                const std::size_t input_linear =
+                                    ((n * in_c + c) * in_h + (base_h + kh)) *
+                                        in_w +
+                                    (base_w + kw);
+                                const std::string value =
+                                    ReadElement(*input, input_linear);
+                                if (acc.empty()) {
+                                    acc = value;
+                                    continue;
+                                }
+                                const std::string cmp = NextTemp();
+                                const std::string next = NextTemp();
+                                out_ << "  " << cmp << " = fcmp ogt float "
+                                     << acc << ", " << value << '\n';
+                                out_ << "  " << next << " = select i1 " << cmp
+                                     << ", float " << acc << ", float " << value
+                                     << '\n';
+                                acc = next;
+                            }
+                        }
+                        const std::size_t out_linear =
+                            ((n * c_size + c) * out_h + oh) * out_w + ow;
+                        StoreElement(output, out_linear, acc);
+                    }
+                }
+            }
+        }
         return true;
     }
 

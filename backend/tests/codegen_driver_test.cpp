@@ -45,6 +45,16 @@ module {
 }
 )mlir";
 
+const char* kMaxPoolMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1x1x4x4xf32>) -> tensor<1x1x2x2xf32> {
+    %t0 = tensor.empty() : tensor<1x1x2x2xf32>
+    %t1 = linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]} ins(%arg0 : tensor<1x1x4x4xf32>) outs(%t0 : tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32>
+    return %t1 : tensor<1x1x2x2xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -144,6 +154,27 @@ int main()
                                    "tc_codegen_padded_conv_test.ll"),
                 "llc must accept padded Conv LLVM IR")) {
         std::cerr << padded_conv_ir << '\n';
+        return 1;
+    }
+
+    std::string maxpool_ir;
+    if (!Expect(
+            tc::backend::EmitLlvmIrFromMlirText(
+                kMaxPoolMlir, "maxpool.mlir", {}, {}, maxpool_ir, diagnostic),
+            "MaxPool MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(maxpool_ir.find("linalg.pooling") == std::string::npos,
+                "LLVM IR must not contain linalg pooling") ||
+        !Expect(maxpool_ir.find("fcmp ogt float") != std::string::npos,
+                "MaxPool LLVM IR must compare window values") ||
+        !Expect(ValidateLlvmIr(maxpool_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_maxpool_test.ll"),
+                "llc must accept MaxPool LLVM IR")) {
+        std::cerr << maxpool_ir << '\n';
         return 1;
     }
 
