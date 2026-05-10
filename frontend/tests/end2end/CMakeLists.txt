@@ -149,6 +149,26 @@ set_tests_properties(emit_mlir_conv PROPERTIES
   WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
+add_test(
+  NAME emit_mlir_mnist
+  COMMAND emit_mlir_test
+          --driver $<TARGET_FILE:frontend_driver>
+          --model ${PROJECT_SOURCE_DIR}/models/mnist-8.onnx
+          --expect "func.func @tc_model(%arg0: tensor<1x1x28x28xf32>) -> tensor<1x10xf32>"
+          --expect tensor.pad
+          --expect linalg.conv_2d_nchw_fchw
+          --expect linalg.pooling_nchw_max
+          --expect linalg.matmul
+          --expect tensor.reshape
+          --expect arith.maximumf
+          --expect arith.addf
+)
+
+set_tests_properties(emit_mlir_mnist PROPERTIES
+  LABELS "end2end"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+
 add_executable(verify_shape_invalid_test
   src/verify_shape_invalid_test.cpp
 )
