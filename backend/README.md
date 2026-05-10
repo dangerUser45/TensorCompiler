@@ -28,13 +28,18 @@ Backend принимает MLIR, который генерирует frontend д
 - `arith.mulf`
 - `arith.maximumf`
 - `linalg.matmul`
+- `tensor.reshape`
+- `linalg.pooling_nchw_max {kernel = [...], strides = [...]}`
 - `linalg.transpose`
-- `linalg.conv_2d_nchw_fchw`
+- `linalg.conv_2d_nchw_fchw` with optional `{pads = [top, left, bottom, right]}`
 
 Ограничения MVP:
 - только `float32`;
 - только static tensor shapes;
-- Conv только NCHW/FCHW, stride/pad/dilation default frontend subset;
+- Conv только NCHW/FCHW, strides/dilations default frontend subset,
+  optional explicit zero-padding через `pads`;
+- MaxPool только NCHW, explicit 2D kernel/strides, без padding в handoff;
+- Reshape только static reshape без изменения element count;
 - executable runner принимает один input tensor и пишет один output tensor.
 
 ## Структура
@@ -90,6 +95,7 @@ ctest --test-dir build --output-on-failure
 ./build/frontend/frontend_driver frontend/models/exec_conv_relu.onnx --emit-asm=build/exec_conv_relu.s
 ./build/frontend/frontend_driver frontend/models/exec_conv_relu.onnx --emit-object=build/exec_conv_relu.o
 ./build/frontend/frontend_driver frontend/models/exec_conv_relu.onnx --emit-exe=build/exec_conv_relu_runner
+./build/frontend/frontend_driver frontend/models/mnist-8.onnx --emit-exe=build/mnist8_runner
 ```
 
 Backend-related опции driver:
@@ -154,6 +160,7 @@ Full executable reference test:
 
 ```bash
 ctest --test-dir build --output-on-failure -R exec_conv_relu
+ctest --test-dir build --output-on-failure -R exec_mnist8
 ```
 
 Покрытие включает:
@@ -163,6 +170,8 @@ ctest --test-dir build --output-on-failure -R exec_conv_relu
 - object emission test через `llc`
 - executable linker test с реальным запуском runner
 - full reference test для `frontend/models/exec_conv_relu.onnx`
+- full reference test для `frontend/models/mnist-8.onnx`, включая padded Conv,
+  MaxPool и Reshape
 
 ## Форматирование
 

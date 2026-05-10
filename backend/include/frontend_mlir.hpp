@@ -32,6 +32,8 @@ enum class FrontendMlirOpKind
     kMulF,
     kMaximumF,
     kMatMul,
+    kReshape,
+    kMaxPoolNchw,
     kTranspose,
     kConv2DNchwFchw,
     kReturn
@@ -46,6 +48,9 @@ struct FrontendMlirOp final
     std::vector<float> constant_values;
     bool constant_is_splat = false;
     std::vector<int64_t> dimensions;
+    std::vector<int64_t> kernel_shape;
+    std::vector<int64_t> strides;
+    std::vector<int64_t> pads;
 };
 
 struct FrontendMlirModule final

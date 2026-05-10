@@ -2,8 +2,11 @@
 
 #include "frontend_mlir.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -81,15 +84,12 @@ struct TensorStorage final
 
 std::string FloatLiteral(float value)
 {
-    if (std::isnan(value)) {
-        return "0x7FF8000000000000";
-    }
-    if (std::isinf(value)) {
-        return value > 0 ? "0x7FF0000000000000" : "0xFFF0000000000000";
-    }
-
+    const double promoted = static_cast<double>(value);
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &promoted, sizeof(bits));
     std::ostringstream out;
-    out << std::scientific << std::setprecision(9) << value;
+    out << "0x" << std::uppercase << std::hex << std::setw(16)
+        << std::setfill('0') << bits;
     return out.str();
 }
 
@@ -317,6 +317,10 @@ private:
                 return EmitElementwise(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kMatMul:
                 return EmitMatMul(op, diagnostic);
+            case tc::backend::FrontendMlirOpKind::kReshape:
+                return EmitReshape(op, diagnostic);
+            case tc::backend::FrontendMlirOpKind::kMaxPoolNchw:
+                return EmitMaxPool(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kTranspose:
                 return EmitTranspose(op, diagnostic);
             case tc::backend::FrontendMlirOpKind::kConv2DNchwFchw:
@@ -473,6 +477,108 @@ private:
         return true;
     }
 
+    bool EmitReshape(const tc::backend::FrontendMlirOp& op,
+                     tc::backend::BackendDiagnostic& diagnostic)
+    {
+        if (op.operands.size() != 1) {
+            return Fail(diagnostic, "reshape expects one input");
+        }
+        const TensorStorage* input = FindValue(op.operands[0]);
+        if (!input) {
+            return Fail(diagnostic, "unknown reshape input " + op.operands[0]);
+        }
+        if (input->type.element_count() != op.result_type.element_count()) {
+            return Fail(diagnostic,
+                        "reshape input and output element counts must match");
+        }
+
+        TensorStorage output = *input;
+        output.type = op.result_type;
+        values_[op.result] = std::move(output);
+        return true;
+    }
+
+    bool EmitMaxPool(const tc::backend::FrontendMlirOp& op,
+                     tc::backend::BackendDiagnostic& diagnostic)
+    {
+        if (op.operands.empty()) {
+            return Fail(diagnostic, "MaxPool expects an input");
+        }
+        const TensorStorage* input = FindValue(op.operands[0]);
+        if (!input || input->type.shape.size() != 4 ||
+            op.result_type.shape.size() != 4) {
+            return Fail(diagnostic, "MaxPool expects rank-4 NCHW tensors");
+        }
+        if (op.kernel_shape.size() != 2 || op.strides.size() != 2 ||
+            op.kernel_shape[0] <= 0 || op.kernel_shape[1] <= 0 ||
+            op.strides[0] <= 0 || op.strides[1] <= 0) {
+            return Fail(diagnostic,
+                        "MaxPool expects positive 2D kernel and strides");
+        }
+
+        const std::size_t n_size =
+            static_cast<std::size_t>(op.result_type.shape[0]);
+        const std::size_t c_size =
+            static_cast<std::size_t>(op.result_type.shape[1]);
+        const std::size_t out_h =
+            static_cast<std::size_t>(op.result_type.shape[2]);
+        const std::size_t out_w =
+            static_cast<std::size_t>(op.result_type.shape[3]);
+        const std::size_t in_c = static_cast<std::size_t>(input->type.shape[1]);
+        const std::size_t in_h = static_cast<std::size_t>(input->type.shape[2]);
+        const std::size_t in_w = static_cast<std::size_t>(input->type.shape[3]);
+        const std::size_t kernel_h =
+            static_cast<std::size_t>(op.kernel_shape[0]);
+        const std::size_t kernel_w =
+            static_cast<std::size_t>(op.kernel_shape[1]);
+        const std::size_t stride_h = static_cast<std::size_t>(op.strides[0]);
+        const std::size_t stride_w = static_cast<std::size_t>(op.strides[1]);
+        if (c_size != in_c ||
+            (out_h > 0 && (out_h - 1) * stride_h + kernel_h > in_h) ||
+            (out_w > 0 && (out_w - 1) * stride_w + kernel_w > in_w)) {
+            return Fail(diagnostic, "MaxPool output shape is incompatible");
+        }
+
+        TensorStorage output = CreateBuffer(op.result, op.result_type);
+        for (std::size_t n = 0; n < n_size; ++n) {
+            for (std::size_t c = 0; c < c_size; ++c) {
+                for (std::size_t oh = 0; oh < out_h; ++oh) {
+                    for (std::size_t ow = 0; ow < out_w; ++ow) {
+                        const std::size_t base_h = oh * stride_h;
+                        const std::size_t base_w = ow * stride_w;
+                        std::string acc;
+                        for (std::size_t kh = 0; kh < kernel_h; ++kh) {
+                            for (std::size_t kw = 0; kw < kernel_w; ++kw) {
+                                const std::size_t input_linear =
+                                    ((n * in_c + c) * in_h + (base_h + kh)) *
+                                        in_w +
+                                    (base_w + kw);
+                                const std::string value =
+                                    ReadElement(*input, input_linear);
+                                if (acc.empty()) {
+                                    acc = value;
+                                    continue;
+                                }
+                                const std::string cmp = NextTemp();
+                                const std::string next = NextTemp();
+                                out_ << "  " << cmp << " = fcmp ogt float "
+                                     << acc << ", " << value << '\n';
+                                out_ << "  " << next << " = select i1 " << cmp
+                                     << ", float " << acc << ", float " << value
+                                     << '\n';
+                                acc = next;
+                            }
+                        }
+                        const std::size_t out_linear =
+                            ((n * c_size + c) * out_h + oh) * out_w + ow;
+                        StoreElement(output, out_linear, acc);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     bool EmitTranspose(const tc::backend::FrontendMlirOp& op,
                        tc::backend::BackendDiagnostic& diagnostic)
     {
@@ -535,6 +641,17 @@ private:
             static_cast<std::size_t>(weight->type.shape[2]);
         const std::size_t kernel_w =
             static_cast<std::size_t>(weight->type.shape[3]);
+        const std::vector<int64_t> pads =
+            op.pads.empty() ? std::vector<int64_t>{ 0, 0, 0, 0 } : op.pads;
+        if (pads.size() != 4 ||
+            std::any_of(pads.begin(), pads.end(), [](int64_t pad) {
+                return pad < 0;
+            })) {
+            return Fail(diagnostic,
+                        "conv pads must contain four non-negative values");
+        }
+        const int64_t pad_top = pads[0];
+        const int64_t pad_left = pads[1];
 
         for (std::size_t n = 0; n < n_size; ++n) {
             for (std::size_t f = 0; f < f_size; ++f) {
@@ -544,10 +661,21 @@ private:
                         for (std::size_t c = 0; c < c_size; ++c) {
                             for (std::size_t kh = 0; kh < kernel_h; ++kh) {
                                 for (std::size_t kw = 0; kw < kernel_w; ++kw) {
+                                    const int64_t ih =
+                                        static_cast<int64_t>(oh + kh) - pad_top;
+                                    const int64_t iw =
+                                        static_cast<int64_t>(ow + kw) -
+                                        pad_left;
+                                    if (ih < 0 || iw < 0 ||
+                                        ih >= static_cast<int64_t>(in_h) ||
+                                        iw >= static_cast<int64_t>(in_w)) {
+                                        continue;
+                                    }
                                     const std::size_t input_linear =
-                                        ((n * c_size + c) * in_h + (oh + kh)) *
+                                        ((n * c_size + c) * in_h +
+                                         static_cast<std::size_t>(ih)) *
                                             in_w +
-                                        (ow + kw);
+                                        static_cast<std::size_t>(iw);
                                     const std::size_t weight_linear =
                                         ((f * c_size + c) * kernel_h + kh) *
                                             kernel_w +
@@ -655,7 +783,7 @@ bool EmitAsmFromMlirText(const std::string& mlir_text,
         return false;
     }
 
-    std::string command = "llc -filetype=asm";
+    std::string command = "llc -O0 -filetype=asm";
     if (!target_triple.empty()) {
         command += " -mtriple=" + target_triple;
     }

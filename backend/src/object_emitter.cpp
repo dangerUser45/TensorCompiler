@@ -94,7 +94,7 @@ bool EmitObjectFromMlirText(const std::string& mlir_text,
         return false;
     }
 
-    std::string command = "llc -filetype=obj";
+    std::string command = "llc -O0 -filetype=obj";
     if (!target_triple.empty()) {
         command += " -mtriple=" + target_triple;
     }

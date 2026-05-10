@@ -22,6 +22,20 @@ module {
 }
 )mlir";
 
+const char* kMnistOpsMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1x1x28x28xf32>) -> tensor<1x1568xf32> {
+    %cst0 = arith.constant dense<1.0> : tensor<8x1x5x5xf32>
+    %t0 = tensor.empty() : tensor<1x8x28x28xf32>
+    %t1 = linalg.conv_2d_nchw_fchw {pads = [2, 2, 2, 2]} ins(%arg0, %cst0 : tensor<1x1x28x28xf32>, tensor<8x1x5x5xf32>) outs(%t0 : tensor<1x8x28x28xf32>) -> tensor<1x8x28x28xf32>
+    %t2 = tensor.empty() : tensor<1x8x14x14xf32>
+    %t3 = linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]} ins(%t1 : tensor<1x8x28x28xf32>) outs(%t2 : tensor<1x8x14x14xf32>) -> tensor<1x8x14x14xf32>
+    %t4 = tensor.reshape %t3 : tensor<1x8x14x14xf32> to tensor<1x1568xf32>
+    return %t4 : tensor<1x1568xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -72,6 +86,36 @@ int main()
     if (!Expect(saw_conv, "parser must detect linalg Conv") ||
         !Expect(saw_broadcast, "parser must detect linalg broadcast") ||
         !Expect(saw_relu, "parser must detect arith.maximumf")) {
+        return 1;
+    }
+
+    tc::backend::FrontendMlirModule mnist_ops_module;
+    if (!Expect(
+            tc::backend::ParseFrontendMlirModule(
+                kMnistOpsMlir, "mnist_ops.mlir", mnist_ops_module, diagnostic),
+            "MNIST handoff ops MLIR must parse")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    bool saw_padded_conv = false;
+    bool saw_pool = false;
+    bool saw_reshape = false;
+    for (const auto& op : mnist_ops_module.ops) {
+        if (op.kind == tc::backend::FrontendMlirOpKind::kConv2DNchwFchw) {
+            saw_padded_conv = op.pads == std::vector<int64_t>({ 2, 2, 2, 2 });
+        }
+        saw_pool = saw_pool ||
+                   (op.kind == tc::backend::FrontendMlirOpKind::kMaxPoolNchw &&
+                    op.kernel_shape == std::vector<int64_t>({ 2, 2 }) &&
+                    op.strides == std::vector<int64_t>({ 2, 2 }));
+        saw_reshape =
+            saw_reshape || op.kind == tc::backend::FrontendMlirOpKind::kReshape;
+    }
+
+    if (!Expect(saw_padded_conv, "parser must capture Conv pads") ||
+        !Expect(saw_pool, "parser must detect MaxPool attrs") ||
+        !Expect(saw_reshape, "parser must detect tensor.reshape")) {
         return 1;
     }
 

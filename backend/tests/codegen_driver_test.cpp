@@ -25,6 +25,46 @@ module {
 }
 )mlir";
 
+const char* kReshapeMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<2x3xf32>) -> tensor<3x2xf32> {
+    %t0 = tensor.reshape %arg0 : tensor<2x3xf32> to tensor<3x2xf32>
+    return %t0 : tensor<3x2xf32>
+  }
+}
+)mlir";
+
+const char* kPaddedConvMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32> {
+    %cst0 = arith.constant dense<[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]> : tensor<1x1x3x3xf32>
+    %t0 = tensor.empty() : tensor<1x1x2x2xf32>
+    %t1 = linalg.conv_2d_nchw_fchw {pads = [1, 1, 1, 1]} ins(%arg0, %cst0 : tensor<1x1x2x2xf32>, tensor<1x1x3x3xf32>) outs(%t0 : tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32>
+    return %t1 : tensor<1x1x2x2xf32>
+  }
+}
+)mlir";
+
+const char* kMaxPoolMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1x1x4x4xf32>) -> tensor<1x1x2x2xf32> {
+    %t0 = tensor.empty() : tensor<1x1x2x2xf32>
+    %t1 = linalg.pooling_nchw_max {kernel = [2, 2], strides = [2, 2]} ins(%arg0 : tensor<1x1x4x4xf32>) outs(%t0 : tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32>
+    return %t1 : tensor<1x1x2x2xf32>
+  }
+}
+)mlir";
+
+const char* kNonExactFloatConstantMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1xf32>) -> tensor<1xf32> {
+    %cst0 = arith.constant dense<1.018964529> : tensor<1xf32>
+    %t0 = arith.addf %arg0, %cst0 : tensor<1xf32>
+    return %t0 : tensor<1xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -32,6 +72,17 @@ bool Expect(bool condition, const std::string& message)
         return false;
     }
     return true;
+}
+
+bool ValidateLlvmIr(const std::string& llvm_ir,
+                    const std::filesystem::path& ir_path)
+{
+    {
+        std::ofstream out(ir_path, std::ios::out | std::ios::trunc);
+        out << llvm_ir;
+    }
+    const std::string validate_cmd = "llc -filetype=null " + ir_path.string();
+    return std::system(validate_cmd.c_str()) == 0;
 }
 
 } // namespace
@@ -67,16 +118,95 @@ int main()
         return 1;
     }
 
-    const std::filesystem::path ir_path =
-        std::filesystem::temp_directory_path() / "tc_codegen_driver_test.ll";
-    {
-        std::ofstream out(ir_path, std::ios::out | std::ios::trunc);
-        out << llvm_ir;
-    }
-    const std::string validate_cmd = "llc -filetype=null " + ir_path.string();
-    if (!Expect(std::system(validate_cmd.c_str()) == 0,
+    if (!Expect(ValidateLlvmIr(llvm_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_driver_test.ll"),
                 "llc must accept generated LLVM IR")) {
         std::cerr << llvm_ir << '\n';
+        return 1;
+    }
+
+    std::string reshape_ir;
+    if (!Expect(
+            tc::backend::EmitLlvmIrFromMlirText(
+                kReshapeMlir, "reshape.mlir", {}, {}, reshape_ir, diagnostic),
+            "reshape MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(reshape_ir.find("tensor.reshape") == std::string::npos,
+                "LLVM IR must not contain tensor.reshape") ||
+        !Expect(ValidateLlvmIr(reshape_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_reshape_test.ll"),
+                "llc must accept reshape LLVM IR")) {
+        std::cerr << reshape_ir << '\n';
+        return 1;
+    }
+
+    std::string padded_conv_ir;
+    if (!Expect(tc::backend::EmitLlvmIrFromMlirText(kPaddedConvMlir,
+                                                    "padded_conv.mlir",
+                                                    {},
+                                                    {},
+                                                    padded_conv_ir,
+                                                    diagnostic),
+                "padded Conv MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(padded_conv_ir.find("linalg.conv") == std::string::npos,
+                "LLVM IR must not contain linalg Conv") ||
+        !Expect(ValidateLlvmIr(padded_conv_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_padded_conv_test.ll"),
+                "llc must accept padded Conv LLVM IR")) {
+        std::cerr << padded_conv_ir << '\n';
+        return 1;
+    }
+
+    std::string maxpool_ir;
+    if (!Expect(
+            tc::backend::EmitLlvmIrFromMlirText(
+                kMaxPoolMlir, "maxpool.mlir", {}, {}, maxpool_ir, diagnostic),
+            "MaxPool MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(maxpool_ir.find("linalg.pooling") == std::string::npos,
+                "LLVM IR must not contain linalg pooling") ||
+        !Expect(maxpool_ir.find("fcmp ogt float") != std::string::npos,
+                "MaxPool LLVM IR must compare window values") ||
+        !Expect(ValidateLlvmIr(maxpool_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_maxpool_test.ll"),
+                "llc must accept MaxPool LLVM IR")) {
+        std::cerr << maxpool_ir << '\n';
+        return 1;
+    }
+
+    std::string non_exact_constant_ir;
+    if (!Expect(tc::backend::EmitLlvmIrFromMlirText(kNonExactFloatConstantMlir,
+                                                    "non_exact_constant.mlir",
+                                                    {},
+                                                    {},
+                                                    non_exact_constant_ir,
+                                                    diagnostic),
+                "non-exact float constant MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(non_exact_constant_ir.find("0x") != std::string::npos,
+                "non-exact float constants must be hex literals") ||
+        !Expect(ValidateLlvmIr(non_exact_constant_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_non_exact_constant_test.ll"),
+                "llc must accept non-exact float constant LLVM IR")) {
+        std::cerr << non_exact_constant_ir << '\n';
         return 1;
     }
 
