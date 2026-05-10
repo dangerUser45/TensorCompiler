@@ -783,7 +783,7 @@ bool EmitAsmFromMlirText(const std::string& mlir_text,
         return false;
     }
 
-    std::string command = "llc -filetype=asm";
+    std::string command = "llc -O0 -filetype=asm";
     if (!target_triple.empty()) {
         command += " -mtriple=" + target_triple;
     }
