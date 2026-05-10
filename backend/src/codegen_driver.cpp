@@ -2,6 +2,7 @@
 
 #include "frontend_mlir.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -560,6 +561,17 @@ private:
             static_cast<std::size_t>(weight->type.shape[2]);
         const std::size_t kernel_w =
             static_cast<std::size_t>(weight->type.shape[3]);
+        const std::vector<int64_t> pads =
+            op.pads.empty() ? std::vector<int64_t>{ 0, 0, 0, 0 } : op.pads;
+        if (pads.size() != 4 ||
+            std::any_of(pads.begin(), pads.end(), [](int64_t pad) {
+                return pad < 0;
+            })) {
+            return Fail(diagnostic,
+                        "conv pads must contain four non-negative values");
+        }
+        const int64_t pad_top = pads[0];
+        const int64_t pad_left = pads[1];
 
         for (std::size_t n = 0; n < n_size; ++n) {
             for (std::size_t f = 0; f < f_size; ++f) {
@@ -569,10 +581,21 @@ private:
                         for (std::size_t c = 0; c < c_size; ++c) {
                             for (std::size_t kh = 0; kh < kernel_h; ++kh) {
                                 for (std::size_t kw = 0; kw < kernel_w; ++kw) {
+                                    const int64_t ih =
+                                        static_cast<int64_t>(oh + kh) - pad_top;
+                                    const int64_t iw =
+                                        static_cast<int64_t>(ow + kw) -
+                                        pad_left;
+                                    if (ih < 0 || iw < 0 ||
+                                        ih >= static_cast<int64_t>(in_h) ||
+                                        iw >= static_cast<int64_t>(in_w)) {
+                                        continue;
+                                    }
                                     const std::size_t input_linear =
-                                        ((n * c_size + c) * in_h + (oh + kh)) *
+                                        ((n * c_size + c) * in_h +
+                                         static_cast<std::size_t>(ih)) *
                                             in_w +
-                                        (ow + kw);
+                                        static_cast<std::size_t>(iw);
                                     const std::size_t weight_linear =
                                         ((f * c_size + c) * kernel_h + kh) *
                                             kernel_w +

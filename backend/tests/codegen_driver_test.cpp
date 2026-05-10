@@ -34,6 +34,17 @@ module {
 }
 )mlir";
 
+const char* kPaddedConvMlir = R"mlir(
+module {
+  func.func @tc_model(%arg0: tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32> {
+    %cst0 = arith.constant dense<[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]> : tensor<1x1x3x3xf32>
+    %t0 = tensor.empty() : tensor<1x1x2x2xf32>
+    %t1 = linalg.conv_2d_nchw_fchw {pads = [1, 1, 1, 1]} ins(%arg0, %cst0 : tensor<1x1x2x2xf32>, tensor<1x1x3x3xf32>) outs(%t0 : tensor<1x1x2x2xf32>) -> tensor<1x1x2x2xf32>
+    return %t1 : tensor<1x1x2x2xf32>
+  }
+}
+)mlir";
+
 bool Expect(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -111,6 +122,28 @@ int main()
                                    "tc_codegen_reshape_test.ll"),
                 "llc must accept reshape LLVM IR")) {
         std::cerr << reshape_ir << '\n';
+        return 1;
+    }
+
+    std::string padded_conv_ir;
+    if (!Expect(tc::backend::EmitLlvmIrFromMlirText(kPaddedConvMlir,
+                                                    "padded_conv.mlir",
+                                                    {},
+                                                    {},
+                                                    padded_conv_ir,
+                                                    diagnostic),
+                "padded Conv MLIR must emit LLVM IR")) {
+        std::cerr << tc::backend::FormatBackendDiagnostic(diagnostic) << '\n';
+        return 1;
+    }
+
+    if (!Expect(padded_conv_ir.find("linalg.conv") == std::string::npos,
+                "LLVM IR must not contain linalg Conv") ||
+        !Expect(ValidateLlvmIr(padded_conv_ir,
+                               std::filesystem::temp_directory_path() /
+                                   "tc_codegen_padded_conv_test.ll"),
+                "llc must accept padded Conv LLVM IR")) {
+        std::cerr << padded_conv_ir << '\n';
         return 1;
     }
 
