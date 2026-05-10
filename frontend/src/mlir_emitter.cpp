@@ -1,5 +1,6 @@
 #include "mlir_emitter.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -99,6 +100,384 @@ bool BuildMlirTensorType(const tc::frontend::TensorInfo& tensor,
     return true;
 }
 
+std::string MlirTypeFromShape(const std::vector<int64_t>& shape,
+                              tc::frontend::DataID dtype)
+{
+    const auto elem_type = MlirElemType(dtype);
+    if (!elem_type.has_value()) {
+        return std::string();
+    }
+    std::ostringstream out;
+    out << "tensor<";
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        if (i != 0) {
+            out << "x";
+        }
+        if (shape[i] < 0) {
+            out << "?";
+        } else {
+            out << shape[i];
+        }
+    }
+    if (!shape.empty()) {
+        out << "x";
+    }
+    out << *elem_type << ">";
+    return out.str();
+}
+
+bool BroadcastDimsCompatibleI(int64_t lhs, int64_t rhs) noexcept
+{
+    return lhs == rhs || lhs == 1 || rhs == 1 || lhs == -1 || rhs == -1;
+}
+
+int64_t ResolveBroadcastDimI(int64_t lhs, int64_t rhs) noexcept
+{
+    if (lhs == rhs) {
+        return lhs;
+    }
+    if (lhs == 1) {
+        return rhs == -1 ? -1 : rhs;
+    }
+    if (rhs == 1) {
+        return lhs == -1 ? -1 : lhs;
+    }
+    if (lhs == -1) {
+        return rhs;
+    }
+    if (rhs == -1) {
+        return lhs;
+    }
+    return -1;
+}
+
+bool ComputeBroadcastShapeI(const std::vector<int64_t>& lhs,
+                            const std::vector<int64_t>& rhs,
+                            std::vector<int64_t>& out_shape)
+{
+    const std::size_t rank = std::max(lhs.size(), rhs.size());
+    out_shape.assign(rank, -1);
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        const std::size_t lhs_off = rank - lhs.size();
+        const std::size_t rhs_off = rank - rhs.size();
+        const int64_t l = axis < lhs_off ? 1 : lhs[axis - lhs_off];
+        const int64_t r = axis < rhs_off ? 1 : rhs[axis - rhs_off];
+        if (!BroadcastDimsCompatibleI(l, r)) {
+            return false;
+        }
+        out_shape[axis] = ResolveBroadcastDimI(l, r);
+    }
+    return true;
+}
+
+bool InferReshapeShape(const std::vector<int64_t>& input_shape,
+                       const std::vector<int64_t>& target,
+                       std::vector<int64_t>& out_shape)
+{
+    out_shape = target;
+    int64_t known = 1;
+    int64_t infer_axis = -1;
+    bool all_static = std::all_of(input_shape.begin(),
+                                  input_shape.end(),
+                                  [](int64_t v) { return v >= 0; });
+    int64_t input_count = 1;
+    for (int64_t v : input_shape) {
+        input_count *= v;
+    }
+
+    for (std::size_t i = 0; i < out_shape.size(); ++i) {
+        if (out_shape[i] == 0 && i < input_shape.size()) {
+            out_shape[i] = input_shape[i];
+        }
+        if (out_shape[i] == -1) {
+            if (infer_axis != -1) {
+                return false;
+            }
+            infer_axis = static_cast<int64_t>(i);
+            continue;
+        }
+        if (out_shape[i] < 0) {
+            return false;
+        }
+        known *= out_shape[i];
+    }
+
+    if (infer_axis >= 0) {
+        if (!all_static || known == 0 || input_count % known != 0) {
+            return false;
+        }
+        out_shape[infer_axis] = input_count / known;
+    }
+    return true;
+}
+
+bool InferNodeOutputShape(
+    const tc::frontend::Node& node,
+    const std::unordered_map<std::string, std::vector<int64_t>>& shapes,
+    const std::unordered_map<std::string, std::vector<int64_t>>& int64_inits,
+    std::vector<int64_t>& out_shape)
+{
+    out_shape.clear();
+    auto find_shape =
+        [&shapes](const std::string& name) -> const std::vector<int64_t>* {
+        const auto it = shapes.find(name);
+        return it == shapes.end() ? nullptr : &it->second;
+    };
+
+    const auto& inputs = node.get_inputs();
+    switch (node.get_op_kind()) {
+        case tc::frontend::OpKind::kRelu: {
+            if (inputs.empty()) {
+                return false;
+            }
+            const auto* in_shape = find_shape(inputs[0]);
+            if (!in_shape) {
+                return false;
+            }
+            out_shape = *in_shape;
+            return true;
+        }
+        case tc::frontend::OpKind::kAdd:
+        case tc::frontend::OpKind::kMul: {
+            if (inputs.size() < 2) {
+                return false;
+            }
+            const auto* lhs = find_shape(inputs[0]);
+            const auto* rhs = find_shape(inputs[1]);
+            if (!lhs || !rhs) {
+                return false;
+            }
+            return ComputeBroadcastShapeI(*lhs, *rhs, out_shape);
+        }
+        case tc::frontend::OpKind::kMatMul: {
+            if (inputs.size() < 2) {
+                return false;
+            }
+            const auto* lhs = find_shape(inputs[0]);
+            const auto* rhs = find_shape(inputs[1]);
+            if (!lhs || !rhs || lhs->size() != 2 || rhs->size() != 2) {
+                return false;
+            }
+            out_shape = { (*lhs)[0], (*rhs)[1] };
+            return true;
+        }
+        case tc::frontend::OpKind::kReshape: {
+            if (inputs.size() < 2) {
+                return false;
+            }
+            const auto* in_shape = find_shape(inputs[0]);
+            if (!in_shape) {
+                return false;
+            }
+            const auto target_it = int64_inits.find(inputs[1]);
+            if (target_it == int64_inits.end()) {
+                return false;
+            }
+            return InferReshapeShape(*in_shape, target_it->second, out_shape);
+        }
+        case tc::frontend::OpKind::kTranspose: {
+            if (inputs.empty()) {
+                return false;
+            }
+            const auto* in_shape = find_shape(inputs[0]);
+            if (!in_shape) {
+                return false;
+            }
+            std::vector<int64_t> perm;
+            for (const auto& attr : node.get_attrs()) {
+                if (attr && attr->get_name() == "perm" &&
+                    attr->get_data_type().id == tc::frontend::DataID::INT64) {
+                    perm = attr->get_values<int64_t>();
+                    break;
+                }
+            }
+            if (perm.empty()) {
+                perm.reserve(in_shape->size());
+                for (std::size_t i = 0; i < in_shape->size(); ++i) {
+                    perm.push_back(
+                        static_cast<int64_t>(in_shape->size() - 1 - i));
+                }
+            }
+            if (perm.size() != in_shape->size()) {
+                return false;
+            }
+            out_shape.reserve(perm.size());
+            for (int64_t axis : perm) {
+                if (axis < 0 ||
+                    static_cast<std::size_t>(axis) >= in_shape->size()) {
+                    return false;
+                }
+                out_shape.push_back((*in_shape)[axis]);
+            }
+            return true;
+        }
+        case tc::frontend::OpKind::kConv: {
+            if (inputs.size() < 2) {
+                return false;
+            }
+            const auto* in_shape = find_shape(inputs[0]);
+            const auto* w_shape = find_shape(inputs[1]);
+            if (!in_shape || !w_shape || in_shape->size() != 4 ||
+                w_shape->size() != 4) {
+                return false;
+            }
+            std::vector<int64_t> kernel{ 0, 0 };
+            std::vector<int64_t> strides{ 1, 1 };
+            std::vector<int64_t> pads{ 0, 0, 0, 0 };
+            std::vector<int64_t> dilations{ 1, 1 };
+            for (const auto& attr : node.get_attrs()) {
+                if (!attr ||
+                    attr->get_data_type().id != tc::frontend::DataID::INT64) {
+                    continue;
+                }
+                const auto& v = attr->get_values<int64_t>();
+                if (attr->get_name() == "kernel_shape" && v.size() == 2) {
+                    kernel = v;
+                } else if (attr->get_name() == "strides" && v.size() == 2) {
+                    strides = v;
+                } else if (attr->get_name() == "pads" && v.size() == 4) {
+                    pads = v;
+                } else if (attr->get_name() == "dilations" && v.size() == 2) {
+                    dilations = v;
+                }
+            }
+            if (kernel[0] == 0) {
+                kernel[0] = (*w_shape)[2];
+                kernel[1] = (*w_shape)[3];
+            }
+            const int64_t out_h = ((*in_shape)[2] + pads[0] + pads[2] -
+                                   dilations[0] * (kernel[0] - 1) - 1) /
+                                      strides[0] +
+                                  1;
+            const int64_t out_w = ((*in_shape)[3] + pads[1] + pads[3] -
+                                   dilations[1] * (kernel[1] - 1) - 1) /
+                                      strides[1] +
+                                  1;
+            out_shape = { (*in_shape)[0], (*w_shape)[0], out_h, out_w };
+            return true;
+        }
+        case tc::frontend::OpKind::kMaxPool: {
+            if (inputs.empty()) {
+                return false;
+            }
+            const auto* in_shape = find_shape(inputs[0]);
+            if (!in_shape || in_shape->size() != 4) {
+                return false;
+            }
+            std::vector<int64_t> kernel{ 0, 0 };
+            std::vector<int64_t> strides{ 1, 1 };
+            std::vector<int64_t> pads{ 0, 0, 0, 0 };
+            for (const auto& attr : node.get_attrs()) {
+                if (!attr ||
+                    attr->get_data_type().id != tc::frontend::DataID::INT64) {
+                    continue;
+                }
+                const auto& v = attr->get_values<int64_t>();
+                if (attr->get_name() == "kernel_shape" && v.size() == 2) {
+                    kernel = v;
+                } else if (attr->get_name() == "strides" && v.size() == 2) {
+                    strides = v;
+                } else if (attr->get_name() == "pads" && v.size() == 4) {
+                    pads = v;
+                }
+            }
+            if (kernel[0] == 0) {
+                return false;
+            }
+            const int64_t out_h =
+                ((*in_shape)[2] + pads[0] + pads[2] - (kernel[0] - 1) - 1) /
+                    strides[0] +
+                1;
+            const int64_t out_w =
+                ((*in_shape)[3] + pads[1] + pads[3] - (kernel[1] - 1) - 1) /
+                    strides[1] +
+                1;
+            out_shape = { (*in_shape)[0], (*in_shape)[1], out_h, out_w };
+            return true;
+        }
+        case tc::frontend::OpKind::kUnknown:
+            return false;
+    }
+    return false;
+}
+
+void PrepopulateIntermediateTensorTypes(
+    const tc::frontend::Graph& graph,
+    std::unordered_map<std::string, std::string>& tensor_types)
+{
+    std::unordered_map<std::string, std::vector<int64_t>> shapes;
+    std::unordered_map<std::string, tc::frontend::DataID> dtypes;
+    std::unordered_map<std::string, std::vector<int64_t>> int64_inits;
+
+    auto register_tensor = [&](const std::string& name,
+                               const std::vector<int64_t>& shape,
+                               tc::frontend::DataID dtype) {
+        if (name.empty()) {
+            return;
+        }
+        shapes.emplace(name, shape);
+        dtypes.emplace(name, dtype);
+    };
+
+    for (const auto& t : graph.get_input_tensors()) {
+        if (t) {
+            register_tensor(
+                t->get_name(), t->get_shape(), t->get_data_type().id);
+        }
+    }
+    for (const auto& t : graph.get_output_tensors()) {
+        if (t) {
+            register_tensor(
+                t->get_name(), t->get_shape(), t->get_data_type().id);
+        }
+    }
+    for (const auto& init : graph.get_inits()) {
+        if (!init) {
+            continue;
+        }
+        register_tensor(
+            init->get_name(), init->get_shape(), init->get_data_type().id);
+        if (init->get_data_type().id == tc::frontend::DataID::INT64 &&
+            init->has_values()) {
+            int64_inits[init->get_name()] = init->get_values<int64_t>();
+        }
+    }
+
+    for (const auto& node_ptr : graph.get_nodes()) {
+        if (!node_ptr) {
+            continue;
+        }
+        std::vector<int64_t> out_shape;
+        if (!InferNodeOutputShape(*node_ptr, shapes, int64_inits, out_shape)) {
+            continue;
+        }
+        // Output dtype: use first input's dtype, or float32 fallback.
+        tc::frontend::DataID out_dtype = tc::frontend::DataID::FLOAT;
+        if (!node_ptr->get_inputs().empty()) {
+            const auto it = dtypes.find(node_ptr->get_inputs().front());
+            if (it != dtypes.end() &&
+                it->second != tc::frontend::DataID::UNDEFINED) {
+                out_dtype = it->second;
+            }
+        }
+        for (const auto& output_name : node_ptr->get_outputs()) {
+            if (output_name.empty()) {
+                continue;
+            }
+            shapes[output_name] = out_shape;
+            dtypes[output_name] = out_dtype;
+            const std::string mlir_type =
+                MlirTypeFromShape(out_shape, out_dtype);
+            if (mlir_type.empty()) {
+                continue;
+            }
+            // Do not overwrite types that were explicitly set from graph
+            // input/output/initializer metadata.
+            tensor_types.emplace(output_name, std::move(mlir_type));
+        }
+    }
+}
+
 bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
 {
     if (graph.get_input_tensors().empty() ||
@@ -116,7 +495,9 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             kind != tc::frontend::OpKind::kAdd &&
             kind != tc::frontend::OpKind::kMul &&
             kind != tc::frontend::OpKind::kConv &&
-            kind != tc::frontend::OpKind::kMatMul) {
+            kind != tc::frontend::OpKind::kReshape &&
+            kind != tc::frontend::OpKind::kMatMul &&
+            kind != tc::frontend::OpKind::kMaxPool) {
             return false;
         }
         std::size_t expected_inputs = 0;
@@ -128,8 +509,12 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
             case tc::frontend::OpKind::kAdd:
             case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kConv:
+            case tc::frontend::OpKind::kReshape:
             case tc::frontend::OpKind::kMatMul:
                 expected_inputs = 2;
+                break;
+            case tc::frontend::OpKind::kMaxPool:
+                expected_inputs = 1;
                 break;
             case tc::frontend::OpKind::kUnknown:
                 return false;
@@ -316,8 +701,30 @@ bool IntAttrEquals(const tc::frontend::Node& node,
 bool ConvAttrsSupportedForPlainLinalg(const tc::frontend::Node& node)
 {
     return IntAttrEquals(node, "strides", { 1, 1 }) &&
-           IntAttrEquals(node, "pads", { 0, 0, 0, 0 }) &&
            IntAttrEquals(node, "dilations", { 1, 1 });
+}
+
+bool ConvHasZeroPads(const tc::frontend::Node& node)
+{
+    return IntAttrEquals(node, "pads", { 0, 0, 0, 0 });
+}
+
+bool ReadIntAttr(const tc::frontend::Node& node,
+                 std::string_view name,
+                 std::size_t expected_size,
+                 std::vector<int64_t>& out_values)
+{
+    out_values.clear();
+    const auto* attr = FindAttr(node, name);
+    if (!attr || attr->get_data_type().id != tc::frontend::DataID::INT64) {
+        return false;
+    }
+    const auto& values = attr->get_values<int64_t>();
+    if (values.size() != expected_size) {
+        return false;
+    }
+    out_values = values;
+    return true;
 }
 
 bool EmitSimpleMain(const tc::frontend::Graph& graph,
@@ -405,8 +812,9 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
         if (!init_ptr) {
             continue;
         }
-        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT) {
-            out_error = "ERROR: unsupported non-float32 initializer '" +
+        if (init_ptr->get_data_type().id != tc::frontend::DataID::FLOAT &&
+            init_ptr->get_data_type().id != tc::frontend::DataID::INT64) {
+            out_error = "ERROR: unsupported initializer dtype for '" +
                         init_ptr->get_name() + "' for production MLIR";
             return false;
         }
@@ -417,8 +825,16 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
             return false;
         }
         tensor_types[init_ptr->get_name()] = init_type;
-        initializers_by_name[init_ptr->get_name()] = init_ptr.get();
+        if (init_ptr->get_data_type().id == tc::frontend::DataID::FLOAT) {
+            initializers_by_name[init_ptr->get_name()] = init_ptr.get();
+        }
     }
+
+    // Pre-populate intermediate tensor types via op-specific shape inference
+    // so that ResolveTensorType returns correct types for nodes whose output
+    // is not the final graph output. Without this, multi-node graphs (e.g.
+    // MNIST) silently fall back to the graph output type for intermediates.
+    PrepopulateIntermediateTensorTypes(graph, tensor_types);
 
     std::size_t const_id = 0;
     std::size_t temp_id = 0;
@@ -581,6 +997,48 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 break;
             }
 
+            case tc::frontend::OpKind::kReshape: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                if (input.type == result_type) {
+                    result = input;
+                } else {
+                    result = MlirValue{ NextTemp(), result_type };
+                    out << "    " << result->name << " = tensor.reshape "
+                        << input.name << " : " << input.type << " to "
+                        << result_type << '\n';
+                }
+                break;
+            }
+
+            case tc::frontend::OpKind::kMaxPool: {
+                const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
+                const std::string result_type =
+                    ResolveTensorType(output_name, output_ty);
+                const std::string init = NextTemp();
+                std::vector<int64_t> kernel_shape;
+                std::vector<int64_t> strides;
+                if (!ReadIntAttr(node, "kernel_shape", 2, kernel_shape) ||
+                    !ReadIntAttr(node, "strides", 2, strides)) {
+                    out_error = "ERROR: unsupported MaxPool attributes for "
+                                "production MLIR; kernel_shape and strides "
+                                "must be INT64[2]";
+                    return false;
+                }
+                out << "    " << init << " = tensor.empty() : " << result_type
+                    << '\n';
+                result = MlirValue{ NextTemp(), result_type };
+                out << "    " << result->name
+                    << " = linalg.pooling_nchw_max {kernel = ["
+                    << kernel_shape[0] << ", " << kernel_shape[1]
+                    << "], strides = [" << strides[0] << ", " << strides[1]
+                    << "]} ins(" << input.name << " : " << input.type
+                    << ") outs(" << init << " : " << result_type << ") -> "
+                    << result_type << '\n';
+                break;
+            }
+
             case tc::frontend::OpKind::kTranspose: {
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
                 const std::string result_type =
@@ -600,8 +1058,8 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 if (!ConvAttrsSupportedForPlainLinalg(node)) {
                     out_error =
                         "ERROR: unsupported Conv attributes for production "
-                        "MLIR; only pads=[0,0,0,0], strides=[1,1], and "
-                        "dilations=[1,1] are currently supported";
+                        "MLIR; only strides=[1,1] and dilations=[1,1] are "
+                        "currently supported";
                     return false;
                 }
                 const MlirValue input = ResolveInputValue(node.get_inputs()[0]);
@@ -613,8 +1071,23 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 out << "    " << init << " = tensor.empty() : " << result_type
                     << '\n';
                 result = MlirValue{ NextTemp(), result_type };
-                out << "    " << result->name
-                    << " = linalg.conv_2d_nchw_fchw ins(" << input.name << ", "
+
+                // Padded Conv stays a single op carrying an explicit
+                // {pads = [...]} attribute. The backend's regex parser reads
+                // this attribute on the same line; using tensor.pad with a
+                // region body would require a multi-line MLIR parser.
+                std::string pads_clause;
+                if (!ConvHasZeroPads(node)) {
+                    const auto* pads_attr = FindAttr(node, "pads");
+                    const auto& pads = pads_attr->get_values<int64_t>();
+                    std::ostringstream pc;
+                    pc << " {pads = [" << pads[0] << ", " << pads[1] << ", "
+                       << pads[2] << ", " << pads[3] << "]}";
+                    pads_clause = pc.str();
+                }
+
+                out << "    " << result->name << " = linalg.conv_2d_nchw_fchw"
+                    << pads_clause << " ins(" << input.name << ", "
                     << weight.name << " : " << input.type << ", " << weight.type
                     << ") outs(" << init << " : " << result_type << ") -> "
                     << result_type << '\n';

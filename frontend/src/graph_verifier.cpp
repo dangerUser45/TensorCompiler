@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -156,6 +157,94 @@ bool ComputeChannelBiasBroadcastShape(const std::vector<int64_t>& lhs_shape,
     return false;
 }
 
+bool HasOnlyStaticDims(const std::vector<int64_t>& shape) noexcept
+{
+    return std::all_of(
+        shape.begin(), shape.end(), [](int64_t dim) { return dim >= 0; });
+}
+
+int64_t StaticElementCount(const std::vector<int64_t>& shape) noexcept
+{
+    int64_t count = 1;
+    for (const int64_t dim : shape) {
+        count *= dim;
+    }
+    return count;
+}
+
+bool InferReshapeOutputShape(const std::vector<int64_t>& input_shape,
+                             const std::vector<int64_t>& target_shape_spec,
+                             std::vector<int64_t>& out_shape,
+                             std::string& out_error)
+{
+    out_shape.clear();
+    out_error.clear();
+    if (target_shape_spec.empty()) {
+        out_error = "target shape is empty";
+        return false;
+    }
+
+    std::optional<std::size_t> infer_axis;
+    out_shape = target_shape_spec;
+    for (std::size_t i = 0; i < out_shape.size(); ++i) {
+        const int64_t dim = out_shape[i];
+        if (dim == -1) {
+            if (infer_axis.has_value()) {
+                out_error = "target shape contains multiple -1 dimensions";
+                return false;
+            }
+            infer_axis = i;
+            continue;
+        }
+        if (dim == 0) {
+            if (i >= input_shape.size()) {
+                out_error = "target shape contains axis copy out of range";
+                return false;
+            }
+            out_shape[i] = input_shape[i];
+            continue;
+        }
+        if (dim < -1) {
+            out_error = "target shape contains invalid negative dimension";
+            return false;
+        }
+    }
+
+    const bool input_static = HasOnlyStaticDims(input_shape);
+    const int64_t input_count =
+        input_static ? StaticElementCount(input_shape) : -1;
+
+    bool known_target_static = true;
+    int64_t known_target_count = 1;
+    for (std::size_t i = 0; i < out_shape.size(); ++i) {
+        if (infer_axis.has_value() && *infer_axis == i) {
+            continue;
+        }
+        if (out_shape[i] < 0) {
+            known_target_static = false;
+            break;
+        }
+        known_target_count *= out_shape[i];
+    }
+
+    if (infer_axis.has_value()) {
+        if (!input_static || !known_target_static || known_target_count == 0 ||
+            input_count % known_target_count != 0) {
+            out_error = "cannot infer -1 dimension from input and target shape";
+            return false;
+        }
+        out_shape[*infer_axis] = input_count / known_target_count;
+        return true;
+    }
+
+    if (input_static && known_target_static &&
+        input_count != known_target_count) {
+        out_error = "input and target shapes have different element counts";
+        return false;
+    }
+    return true;
+}
+
 const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
                                         std::string_view name)
 {
@@ -191,6 +280,41 @@ bool ReadRequiredIntAttr(const tc::frontend::Node& node,
         report.add_error("ERROR: " + node_context + " op 'Conv' attribute '" +
                          std::string(attr_name) + "' must have " +
                          std::to_string(expected_size) + " values");
+        return false;
+    }
+    return true;
+}
+
+bool ReadMaxPoolIntAttr(const tc::frontend::Node& node,
+                        const std::string& node_context,
+                        std::string_view attr_name,
+                        std::size_t expected_size,
+                        bool required,
+                        tc::frontend::verify::Report& report,
+                        std::vector<int64_t>& out_values)
+{
+    out_values.clear();
+    const auto* attr = FindAttr(node, attr_name);
+    if (attr == nullptr) {
+        if (required) {
+            report.add_error("ERROR: " + node_context +
+                             " op 'MaxPool' missing " + std::string(attr_name));
+            return false;
+        }
+        return true;
+    }
+    if (attr->get_data_type().id != tc::frontend::DataID::INT64) {
+        report.add_error("ERROR: " + node_context +
+                         " op 'MaxPool' attribute '" + std::string(attr_name) +
+                         "' must be INT64");
+        return false;
+    }
+    out_values = attr->get_values<int64_t>();
+    if (out_values.size() != expected_size) {
+        report.add_error("ERROR: " + node_context +
+                         " op 'MaxPool' attribute '" + std::string(attr_name) +
+                         "' must have " + std::to_string(expected_size) +
+                         " values");
         return false;
     }
     return true;
@@ -233,6 +357,7 @@ public:
         std::unordered_map<std::string, std::vector<int64_t>> tensor_shapes;
         BuildTensorDtypeTable(graph, tensor_dtypes);
         BuildTensorShapeTable(graph, tensor_shapes);
+        BuildInt64InitializerTable(graph);
         VisitNodes(graph.get_nodes(), tensor_dtypes, tensor_shapes);
     }
 
@@ -280,6 +405,7 @@ private:
             case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul:
             case tc::frontend::OpKind::kConv:
+            case tc::frontend::OpKind::kReshape:
                 if (input_count != 2) {
                     AddArityError(
                         node_context, op_kind, "input(s)", 2, input_count);
@@ -290,6 +416,7 @@ private:
                 }
                 break;
             case tc::frontend::OpKind::kTranspose:
+            case tc::frontend::OpKind::kMaxPool:
                 if (input_count != 1) {
                     AddArityError(
                         node_context, op_kind, "input(s)", 1, input_count);
@@ -467,6 +594,40 @@ private:
                 break;
             }
 
+            case tc::frontend::OpKind::kReshape: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+
+                tc::frontend::DataT data_dtype;
+                tc::frontend::DataT shape_dtype;
+                const bool data_ok = ResolveInputDtype(
+                    node, node_context, 0, tensor_dtypes, data_dtype);
+                const bool shape_ok = ResolveInputDtype(
+                    node, node_context, 1, tensor_dtypes, shape_dtype);
+                if (!data_ok || !shape_ok) {
+                    return;
+                }
+
+                if (!IsMvpNumericDataId(data_dtype.id)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Reshape' expects numeric dtype "
+                                      "for input[0], got " +
+                                      DtypeName(data_dtype));
+                    return;
+                }
+                if (shape_dtype.id != tc::frontend::DataID::INT64) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Reshape' expects INT64 dtype for "
+                                      "input[1]");
+                    return;
+                }
+
+                inferred_output_dtype = data_dtype;
+                has_inferred_output_dtype = true;
+                break;
+            }
+
             case tc::frontend::OpKind::kConv: {
                 if (node.get_inputs().size() < 2) {
                     return;
@@ -488,6 +649,30 @@ private:
                                       " op 'Conv' input dtypes mismatch: " +
                                       DtypeName(input_dtype) + " vs " +
                                       DtypeName(weight_dtype));
+                    return;
+                }
+
+                inferred_output_dtype = input_dtype;
+                has_inferred_output_dtype = true;
+                break;
+            }
+
+            case tc::frontend::OpKind::kMaxPool: {
+                if (node.get_inputs().empty()) {
+                    return;
+                }
+
+                tc::frontend::DataT input_dtype;
+                if (!ResolveInputDtype(
+                        node, node_context, 0, tensor_dtypes, input_dtype)) {
+                    return;
+                }
+
+                if (input_dtype.id != tc::frontend::DataID::FLOAT) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' expects float32 input, "
+                                      "got " +
+                                      DtypeName(input_dtype));
                     return;
                 }
 
@@ -733,6 +918,48 @@ private:
                 return;
             }
 
+            case tc::frontend::OpKind::kReshape: {
+                if (node.get_inputs().size() < 2) {
+                    return;
+                }
+
+                std::vector<int64_t> input_shape;
+                if (!ResolveInputShape(
+                        node, node_context, 0, tensor_shapes, input_shape)) {
+                    return;
+                }
+
+                const std::string& shape_tensor_name = node.get_inputs()[1];
+                const auto shape_it =
+                    int64_initializers_.find(shape_tensor_name);
+                if (shape_it == int64_initializers_.end()) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Reshape' input[1] must be an "
+                                      "INT64 initializer");
+                    return;
+                }
+
+                std::vector<int64_t> inferred_shape;
+                std::string reshape_error;
+                if (!InferReshapeOutputShape(input_shape,
+                                             shape_it->second,
+                                             inferred_shape,
+                                             reshape_error)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'Reshape' " + reshape_error);
+                    return;
+                }
+
+                ValidateDeclaredOutputShapes(node,
+                                             node_context,
+                                             "Reshape",
+                                             inferred_shape,
+                                             tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
             case tc::frontend::OpKind::kTranspose: {
                 if (node.get_inputs().empty()) {
                     return;
@@ -905,6 +1132,111 @@ private:
                 return;
             }
 
+            case tc::frontend::OpKind::kMaxPool: {
+                if (node.get_inputs().empty()) {
+                    return;
+                }
+                std::vector<int64_t> input_shape;
+                if (!ResolveInputShape(
+                        node, node_context, 0, tensor_shapes, input_shape)) {
+                    return;
+                }
+
+                if (input_shape.size() != 4) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' input rank must be 4");
+                    return;
+                }
+
+                std::vector<int64_t> kernel_shape;
+                std::vector<int64_t> strides;
+                std::vector<int64_t> pads;
+                const bool attrs_ok = ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "kernel_shape",
+                                                         2,
+                                                         /*required=*/true,
+                                                         report_,
+                                                         kernel_shape) &&
+                                      ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "strides",
+                                                         2,
+                                                         /*required=*/false,
+                                                         report_,
+                                                         strides) &&
+                                      ReadMaxPoolIntAttr(node,
+                                                         node_context,
+                                                         "pads",
+                                                         4,
+                                                         /*required=*/false,
+                                                         report_,
+                                                         pads);
+                if (!attrs_ok) {
+                    return;
+                }
+                if (strides.empty()) {
+                    strides = { 1, 1 };
+                }
+                if (pads.empty()) {
+                    pads = { 0, 0, 0, 0 };
+                }
+
+                if (!AllPositive(kernel_shape) || !AllPositive(strides)) {
+                    report_.add_error("ERROR: " + node_context +
+                                      " op 'MaxPool' kernel_shape and strides "
+                                      "must be positive");
+                    return;
+                }
+                if (!AllNonNegative(pads)) {
+                    report_.add_error(
+                        "ERROR: " + node_context +
+                        " op 'MaxPool' pads must be non-negative");
+                    return;
+                }
+
+                if (input_shape[2] == -1 || input_shape[3] == -1) {
+                    return;
+                }
+
+                const int64_t out_h = (input_shape[2] + pads[0] + pads[2] -
+                                       (kernel_shape[0] - 1) - 1) /
+                                          strides[0] +
+                                      1;
+                const int64_t out_w = (input_shape[3] + pads[1] + pads[3] -
+                                       (kernel_shape[1] - 1) - 1) /
+                                          strides[1] +
+                                      1;
+                if (out_h <= 0 || out_w <= 0) {
+                    report_.add_error(
+                        "ERROR: " + node_context +
+                        " op 'MaxPool' non-positive output shape");
+                    return;
+                }
+
+                const std::vector<int64_t> inferred_shape{
+                    input_shape[0], input_shape[1], out_h, out_w
+                };
+                for (const std::string& output_name : node.get_outputs()) {
+                    const auto* output_shape =
+                        FindTensorShape(tensor_shapes, output_name);
+                    if (output_shape && output_shape->size() != 4) {
+                        report_.add_error(
+                            "ERROR: " + node_context +
+                            " op 'MaxPool' output rank must be 4");
+                        return;
+                    }
+                }
+                ValidateDeclaredOutputShapes(node,
+                                             node_context,
+                                             "MaxPool",
+                                             inferred_shape,
+                                             tensor_shapes);
+                PropagateNodeOutputShape(
+                    node, node_context, inferred_shape, tensor_shapes);
+                return;
+            }
+
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
@@ -1038,6 +1370,19 @@ private:
         }
     }
 
+    void BuildInt64InitializerTable(const tc::frontend::Graph& graph)
+    {
+        int64_initializers_.clear();
+        for (const auto& init : graph.get_inits()) {
+            if (!init ||
+                init->get_data_type().id != tc::frontend::DataID::INT64 ||
+                !init->has_values()) {
+                continue;
+            }
+            int64_initializers_[init->get_name()] = init->get_values<int64_t>();
+        }
+    }
+
     void ValidateNodeAttributes(const tc::frontend::Node& node,
                                 const std::string& node_context)
     {
@@ -1071,12 +1416,14 @@ private:
 
             switch (op_kind) {
                 case tc::frontend::OpKind::kConv:
+                case tc::frontend::OpKind::kMaxPool:
                     break;
 
                 case tc::frontend::OpKind::kRelu:
                 case tc::frontend::OpKind::kAdd:
                 case tc::frontend::OpKind::kMul:
                 case tc::frontend::OpKind::kMatMul:
+                case tc::frontend::OpKind::kReshape:
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +
                         std::string(tc::frontend::ToString(op_kind)) +
@@ -1234,6 +1581,7 @@ private:
     }
 
     tc::frontend::verify::Report& report_;
+    std::unordered_map<std::string, std::vector<int64_t>> int64_initializers_;
 };
 
 } // namespace
@@ -1283,6 +1631,16 @@ bool VerifyGraphForExecution(const Graph& graph, Report& out_report)
 bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
 {
     VerifyGraphForExecution(graph, out_report);
+
+    std::unordered_set<std::string> reshape_shape_inputs;
+    reshape_shape_inputs.reserve(graph.get_nodes().size());
+    for (const auto& node : graph.get_nodes()) {
+        if (!node || node->get_op_kind() != OpKind::kReshape ||
+            node->get_inputs().size() < 2) {
+            continue;
+        }
+        reshape_shape_inputs.insert(node->get_inputs()[1]);
+    }
 
     if (graph.get_input_tensors().size() != 1) {
         out_report.add_error(
@@ -1339,9 +1697,15 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
         }
 
         const std::string label = "initializer '" + init->get_name() + "'";
-        if (init->get_data_type().id != DataID::FLOAT) {
-            out_report.add_error("ERROR: executable verifier " + label +
-                                 " must be float32");
+        const bool is_allowed_reshape_shape =
+            init->get_data_type().id == DataID::INT64 &&
+            reshape_shape_inputs.find(init->get_name()) !=
+                reshape_shape_inputs.end();
+        if (init->get_data_type().id != DataID::FLOAT &&
+            !is_allowed_reshape_shape) {
+            out_report.add_error(
+                "ERROR: executable verifier " + label +
+                " must be float32 or an INT64 Reshape shape initializer");
         }
 
         const auto& shape = init->get_shape();
