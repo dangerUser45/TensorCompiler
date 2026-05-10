@@ -608,6 +608,172 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
     return true;
 }
 
+bool ValidateMaxPoolIntAttrLength(const Attribute& attr,
+                                  std::size_t expected_size,
+                                  std::string& out_error,
+                                  const std::string& node_context)
+{
+    if (attr.get_data_type().id != DataID::INT64) {
+        return SetError(out_error,
+                        "ERROR: " + node_context + " op 'MaxPool' attribute '" +
+                            attr.get_name() + "' must be INTS");
+    }
+    if (attr.get_values<int64_t>().size() != expected_size) {
+        return SetError(out_error,
+                        "ERROR: " + node_context + " op 'MaxPool' attribute '" +
+                            attr.get_name() + "' must have " +
+                            std::to_string(expected_size) + " values");
+    }
+    return true;
+}
+
+bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
+                                std::string& out_error,
+                                const std::string& node_context)
+{
+    std::unordered_set<std::string> seen_names;
+    seen_names.reserve(attrs.size());
+
+    bool has_kernel_shape = false;
+    bool has_strides = false;
+    bool has_pads = false;
+    bool has_auto_pad = false;
+
+    for (std::size_t i = 0; i < attrs.size(); ++i) {
+        if (!attrs[i]) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] is null");
+        }
+        const std::string& attr_name = attrs[i]->get_name();
+        if (attr_name.empty()) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + ".attribute[" +
+                                std::to_string(i) + "] has empty name");
+        }
+        if (!seen_names.insert(attr_name).second) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " has duplicate attribute '" + attr_name + "'");
+        }
+
+        if (attr_name == "kernel_shape") {
+            has_kernel_shape = true;
+            if (!ValidateMaxPoolIntAttrLength(
+                    *attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            const auto& values = attrs[i]->get_values<int64_t>();
+            if (values[0] <= 0 || values[1] <= 0) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' kernel_shape must be "
+                                    "positive");
+            }
+            continue;
+        }
+        if (attr_name == "strides") {
+            has_strides = true;
+            if (!ValidateMaxPoolIntAttrLength(
+                    *attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            const auto& values = attrs[i]->get_values<int64_t>();
+            if (values[0] <= 0 || values[1] <= 0) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' strides must be positive");
+            }
+            continue;
+        }
+        if (attr_name == "pads") {
+            has_pads = true;
+            if (!ValidateMaxPoolIntAttrLength(
+                    *attrs[i], 4, out_error, node_context)) {
+                return false;
+            }
+            for (const int64_t pad : attrs[i]->get_values<int64_t>()) {
+                if (pad < 0) {
+                    return SetError(out_error,
+                                    "ERROR: " + node_context +
+                                        " op 'MaxPool' pads must be "
+                                        "non-negative");
+                }
+            }
+            continue;
+        }
+        if (attr_name == "auto_pad") {
+            has_auto_pad = true;
+            if (attrs[i]->get_data_type().id != DataID::STRING ||
+                attrs[i]->get_values<std::string>().size() != 1) {
+                return SetError(
+                    out_error,
+                    "ERROR: " + node_context +
+                        " op 'MaxPool' attribute 'auto_pad' must be STRING");
+            }
+            const auto& value = attrs[i]->get_values<std::string>().front();
+            if (value != "NOTSET") {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' supports only "
+                                    "auto_pad=NOTSET");
+            }
+            continue;
+        }
+        if (attr_name == "dilations") {
+            if (!ValidateMaxPoolIntAttrLength(
+                    *attrs[i], 2, out_error, node_context)) {
+                return false;
+            }
+            const auto& values = attrs[i]->get_values<int64_t>();
+            if (values[0] != 1 || values[1] != 1) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' supports only "
+                                    "dilations=[1,1]");
+            }
+            continue;
+        }
+        if (attr_name == "ceil_mode") {
+            if (attrs[i]->get_data_type().id != DataID::INT64 ||
+                attrs[i]->get_values<int64_t>().size() != 1) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' attribute 'ceil_mode' must "
+                                    "be INT");
+            }
+            if (attrs[i]->get_values<int64_t>().front() != 0) {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'MaxPool' supports only ceil_mode=0");
+            }
+            continue;
+        }
+
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " op 'MaxPool' has unsupported attribute '" +
+                            attr_name + "'");
+    }
+
+    if (!has_kernel_shape) {
+        return SetError(out_error,
+                        "ERROR: " + node_context +
+                            " op 'MaxPool' missing required attribute "
+                            "'kernel_shape'");
+    }
+    if (!has_strides) {
+        attrs.push_back(MakeIntAttr("strides", { 1, 1 }));
+    }
+    if (!has_pads) {
+        attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
+    }
+    if (!has_auto_pad) {
+        attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
+    }
+    return true;
+}
+
 bool NormalizeNodeAttributes(OpKind op_kind,
                              Node::AttrVecT& attrs,
                              std::string& out_error,
@@ -617,6 +783,9 @@ bool NormalizeNodeAttributes(OpKind op_kind,
     if (op_kind == OpKind::kConv) {
         return NormalizeConvAttributes(
             attrs, out_error, node_context, inferred_kernel_shape);
+    }
+    if (op_kind == OpKind::kMaxPool) {
+        return NormalizeMaxPoolAttributes(attrs, out_error, node_context);
     }
 
     std::unordered_set<std::string> seen_names;
@@ -649,6 +818,7 @@ bool NormalizeNodeAttributes(OpKind op_kind,
             case OpKind::kConv:
             case OpKind::kMatMul:
             case OpKind::kReshape:
+            case OpKind::kMaxPool:
                 return SetError(out_error,
                                 "ERROR: " + node_context + " op '" +
                                     std::string(ToString(op_kind)) +
@@ -876,6 +1046,18 @@ bool ParseNode(const ::onnx::NodeProto& src,
             return SetError(out_error,
                             "ERROR: " + node_context +
                                 " op 'Reshape' expects 1 output");
+        }
+    }
+    if (op_kind == OpKind::kMaxPool) {
+        if (src.input_size() != 1) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'MaxPool' expects 1 input");
+        }
+        if (src.output_size() != 1) {
+            return SetError(out_error,
+                            "ERROR: " + node_context +
+                                " op 'MaxPool' expects 1 output");
         }
     }
 

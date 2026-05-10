@@ -13,7 +13,8 @@ enum class OpKind
     kConv,
     kMatMul,
     kReshape,
-    kTranspose
+    kTranspose,
+    kMaxPool
 };
 
 inline OpKind OpKindFromString(std::string_view op_type) noexcept
@@ -39,6 +40,9 @@ inline OpKind OpKindFromString(std::string_view op_type) noexcept
     if (op_type == "Transpose") {
         return OpKind::kTranspose;
     }
+    if (op_type == "MaxPool") {
+        return OpKind::kMaxPool;
+    }
     return OpKind::kUnknown;
 }
 
@@ -59,6 +63,8 @@ inline const char* ToString(OpKind op_kind) noexcept
             return "Reshape";
         case OpKind::kTranspose:
             return "Transpose";
+        case OpKind::kMaxPool:
+            return "MaxPool";
         case OpKind::kUnknown:
             return "Unknown";
     }

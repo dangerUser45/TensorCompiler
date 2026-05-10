@@ -93,6 +93,42 @@ void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
     return model;
 }
 
+::onnx::ModelProto BuildMaxPoolModel()
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_maxpool_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 1, 4, 4 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 1, 2, 2 });
+
+    auto* node = graph->add_node();
+    node->set_name("maxpool_0");
+    node->set_op_type("MaxPool");
+    node->add_input("x");
+    node->add_output("y");
+
+    // Add MaxPool attributes
+    auto* kernel_shape = node->add_attribute();
+    kernel_shape->set_name("kernel_shape");
+    kernel_shape->set_type(::onnx::AttributeProto::INTS);
+    kernel_shape->add_ints(2);
+    kernel_shape->add_ints(2);
+
+    auto* strides = node->add_attribute();
+    strides->set_name("strides");
+    strides->set_type(::onnx::AttributeProto::INTS);
+    strides->add_ints(2);
+    strides->add_ints(2);
+
+    return model;
+}
+
 class TempModelFile final
 {
 public:
@@ -215,6 +251,24 @@ TEST(ImporterOpKind, ReshapeSetsReshapeKind)
     ASSERT_NE(graph.get_nodes()[0], nullptr);
     EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(),
               tc::frontend::OpKind::kReshape);
+}
+
+TEST(ImporterOpKind, MaxPoolSetsMaxPoolKind)
+{
+    const TempModelFile temp_model(BuildMaxPoolModel());
+
+    ::onnx::ModelProto model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kMaxPool);
 }
 
 TEST(ImporterOpKind, MnistModelFailsOnLaterUnsupportedOperator)

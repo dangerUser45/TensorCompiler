@@ -53,6 +53,37 @@ void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
     return model;
 }
 
+::onnx::ModelProto BuildMaxPoolModel(
+    const std::function<void(::onnx::NodeProto&)>& configure_node)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_maxpool_attr_norm_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 1, 4, 4 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 1, 2, 2 });
+
+    auto* node = graph->add_node();
+    node->set_name("maxpool0");
+    node->set_op_type("MaxPool");
+    node->add_input("x");
+    node->add_output("y");
+
+    auto* kernel = node->add_attribute();
+    kernel->set_name("kernel_shape");
+    kernel->set_type(::onnx::AttributeProto_AttributeType_INTS);
+    kernel->add_ints(2);
+    kernel->add_ints(2);
+
+    configure_node(*node);
+    return model;
+}
+
 ::onnx::ModelProto BuildConvModel(
     const std::function<void(::onnx::NodeProto&)>& configure_node)
 {
@@ -327,6 +358,223 @@ TEST(ImporterAttrNormalization, ConvUnsupportedAutoPadFails)
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
         temp_model.path().string(), loaded_model, graph, error));
     EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolImportsDefaultAttributes)
+{
+    const TempModelFile temp_model(
+        BuildMaxPoolModel([](::onnx::NodeProto&) {}));
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    const auto& node = *graph.get_nodes()[0];
+    EXPECT_EQ(node.get_op_kind(), tc::frontend::OpKind::kMaxPool);
+
+    ASSERT_NE(FindAttr(node, "kernel_shape"), nullptr);
+    EXPECT_EQ(FindAttr(node, "kernel_shape")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 2, 2 }));
+    ASSERT_NE(FindAttr(node, "strides"), nullptr);
+    EXPECT_EQ(FindAttr(node, "strides")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 1, 1 }));
+    ASSERT_NE(FindAttr(node, "pads"), nullptr);
+    EXPECT_EQ(FindAttr(node, "pads")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 0, 0, 0, 0 }));
+    ASSERT_NE(FindAttr(node, "auto_pad"), nullptr);
+    EXPECT_EQ(FindAttr(node, "auto_pad")->get_values<std::string>(),
+              (std::vector<std::string>{ "NOTSET" }));
+}
+
+TEST(ImporterAttrNormalization, MaxPoolPreservesExplicitStridesAndPads)
+{
+    const auto model = BuildMaxPoolModel([](::onnx::NodeProto& node) {
+        auto* strides = node.add_attribute();
+        strides->set_name("strides");
+        strides->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        strides->add_ints(2);
+        strides->add_ints(2);
+
+        auto* pads = node.add_attribute();
+        pads->set_name("pads");
+        pads->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        pads->add_ints(0);
+        pads->add_ints(0);
+        pads->add_ints(1);
+        pads->add_ints(1);
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    const auto& node = *graph.get_nodes()[0];
+    ASSERT_NE(FindAttr(node, "strides"), nullptr);
+    EXPECT_EQ(FindAttr(node, "strides")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 2, 2 }));
+    ASSERT_NE(FindAttr(node, "pads"), nullptr);
+    EXPECT_EQ(FindAttr(node, "pads")->get_values<int64_t>(),
+              (std::vector<int64_t>{ 0, 0, 1, 1 }));
+}
+
+TEST(ImporterAttrNormalization, MaxPoolMissingKernelShapeFails)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_maxpool_no_kernel_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 1, 4, 4 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 1, 2, 2 });
+
+    auto* node = graph->add_node();
+    node->set_name("maxpool0");
+    node->set_op_type("MaxPool");
+    node->add_input("x");
+    node->add_output("y");
+
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph imported_graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, imported_graph, error));
+    EXPECT_NE(error.find("kernel_shape"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolUnsupportedAutoPadFails)
+{
+    const auto model = BuildMaxPoolModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("auto_pad");
+        attr->set_type(::onnx::AttributeProto_AttributeType_STRING);
+        attr->set_s("SAME_UPPER");
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolCeilModeRejected)
+{
+    const auto model = BuildMaxPoolModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("ceil_mode");
+        attr->set_type(::onnx::AttributeProto_AttributeType_INT);
+        attr->set_i(1);
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("ceil_mode"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolNonDefaultDilationsRejected)
+{
+    const auto model = BuildMaxPoolModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("dilations");
+        attr->set_type(::onnx::AttributeProto_AttributeType_INTS);
+        attr->add_ints(2);
+        attr->add_ints(2);
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("dilations"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolUnknownAttributeRejected)
+{
+    const auto model = BuildMaxPoolModel([](::onnx::NodeProto& node) {
+        auto* attr = node.add_attribute();
+        attr->set_name("storage_order");
+        attr->set_type(::onnx::AttributeProto_AttributeType_INT);
+        attr->set_i(1);
+    });
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, graph, error));
+    EXPECT_NE(error.find("storage_order"), std::string::npos) << error;
+}
+
+TEST(ImporterAttrNormalization, MaxPoolIndicesOutputRejected)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_maxpool_indices_graph");
+
+    FillTensorValueInfo(graph->add_input(), "x", { 1, 1, 4, 4 });
+    FillTensorValueInfo(graph->add_output(), "y", { 1, 1, 2, 2 });
+    FillTensorValueInfo(graph->add_output(), "indices", { 1, 1, 2, 2 });
+
+    auto* node = graph->add_node();
+    node->set_name("maxpool0");
+    node->set_op_type("MaxPool");
+    node->add_input("x");
+    node->add_output("y");
+    node->add_output("indices");
+
+    auto* kernel = node->add_attribute();
+    kernel->set_name("kernel_shape");
+    kernel->set_type(::onnx::AttributeProto_AttributeType_INTS);
+    kernel->add_ints(2);
+    kernel->add_ints(2);
+
+    const TempModelFile temp_model(model);
+
+    ::onnx::ModelProto loaded_model;
+    tc::frontend::Graph imported_graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), loaded_model, imported_graph, error));
+    EXPECT_NE(error.find("expects 1 output"), std::string::npos) << error;
 }
 
 TEST(ImporterAttrNormalization, ConvWithBiasNormalizesToConvAdd)
