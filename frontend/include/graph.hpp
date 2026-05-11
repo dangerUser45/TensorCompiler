@@ -81,29 +81,42 @@ private:
     std::vector<int64_t> shape_;
 };
 
+namespace detail {
+
+template<typename T>
+const std::vector<T>& typed_get(DataID id, const TensorData& values)
+{
+    if (id == DataID::UNDEFINED)
+        throw std::logic_error(
+            "Type hasn't been defined yet. Use \"set_values()\"");
+    return std::get<std::vector<T>>(values);
+}
+
+template<typename T>
+void typed_set(DataT& data_type, TensorData& values, std::vector<T> vec)
+{
+    const DataT new_type = TypeInfo<T>::type;
+    if (data_type.id != DataID::UNDEFINED && data_type.id != new_type.id)
+        throw std::logic_error("set_values: dtype change is forbidden");
+    values = std::move(vec);
+    data_type = new_type;
+}
+
+} // namespace detail
+
 struct Initializers final : public TensorInfo
 {
 public:
     template<typename T>
     const std::vector<T>& get_values() const
     {
-        if (data_type_.id == DataID::UNDEFINED)
-            throw std::logic_error(
-                "Type hasn't been defined yet. Use \"set_values()\"");
-        return std::get<std::vector<T>>(values_);
+        return detail::typed_get<T>(data_type_.id, values_);
     }
 
     template<typename T>
     void set_values(std::vector<T> vec)
     {
-        DataT type = TypeInfo<T>::type;
-
-        // Если тип уже зафиксирован, запрещаем менять его на другой.
-        if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
-            throw std::logic_error("set_values: dtype change is forbidden");
-        }
-        values_ = std::move(vec);
-        data_type_ = type;
+        detail::typed_set(data_type_, values_, std::move(vec));
     }
 
     bool has_values() const noexcept
@@ -121,10 +134,7 @@ public:
     template<typename T>
     const std::vector<T>& get_values() const
     {
-        if (data_type_.id == DataID::UNDEFINED)
-            throw std::logic_error(
-                "Type hasn't been defined yet. Use \"set_values()\"");
-        return std::get<std::vector<T>>(values_);
+        return detail::typed_get<T>(data_type_.id, values_);
     }
 
     const std::string& get_name() const noexcept
@@ -139,14 +149,7 @@ public:
     template<typename T>
     void set_values(std::vector<T> vec)
     {
-        DataT type = TypeInfo<T>::type;
-
-        // Если тип уже зафиксирован, запрещаем менять его на другой.
-        if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
-            throw std::logic_error("set_values: dtype change is forbidden");
-        }
-        values_ = std::move(vec);
-        data_type_ = type;
+        detail::typed_set(data_type_, values_, std::move(vec));
     }
 
     void set_name(std::string name)
