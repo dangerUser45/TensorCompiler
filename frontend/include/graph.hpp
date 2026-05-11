@@ -68,7 +68,7 @@ public:
         data_type_ = std::move(data_type);
     }
 
-    DataT get_data_type() const noexcept
+    const DataT& get_data_type() const noexcept
     {
         return data_type_;
     }
@@ -131,7 +131,7 @@ public:
     {
         return name_;
     }
-    DataT get_data_type() const noexcept
+    const DataT& get_data_type() const noexcept
     {
         return data_type_;
     }
