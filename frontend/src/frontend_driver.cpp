@@ -19,39 +19,11 @@
 #include "object_emitter.hpp"
 #endif
 
-#ifndef TC_DEFAULT_DUMP_DIR
-#define TC_DEFAULT_DUMP_DIR "build/dump"
-#endif
-
-#ifndef TC_DEFAULT_HASH_DIR
-#define TC_DEFAULT_HASH_DIR "build/hash"
-#endif
-
-#ifndef TC_DEFAULT_MLIR_DIR
-#define TC_DEFAULT_MLIR_DIR "build/mlir"
-#endif
-
-#ifndef TC_DEFAULT_METADATA_DIR
-#define TC_DEFAULT_METADATA_DIR "build/metadata"
-#endif
-
-#ifndef TC_DEFAULT_LLVM_DIR
-#define TC_DEFAULT_LLVM_DIR "build/llvm"
-#endif
-
-#ifndef TC_DEFAULT_ASM_DIR
-#define TC_DEFAULT_ASM_DIR "build/asm"
-#endif
-
-#ifndef TC_DEFAULT_OBJECT_DIR
-#define TC_DEFAULT_OBJECT_DIR "build/object"
-#endif
-
-#ifndef TC_DEFAULT_EXE_DIR
-#define TC_DEFAULT_EXE_DIR "build/bin"
-#endif
+#include "driver_defaults.hpp"
 
 namespace {
+
+using namespace tc::frontend::driver;
 
 enum LongOptionCode
 {
@@ -107,15 +79,16 @@ inline std::string BuildUsage(const char* argv0)
 }
 
 std::string BuildPathByModelName(const std::string& input_path,
-                                 const std::string& dir,
-                                 const std::string& ext)
+                                 std::string_view dir,
+                                 std::string_view ext)
 {
     const std::filesystem::path input(input_path);
     std::string model_name = input.stem().string();
     if (model_name.empty()) {
         model_name = "model";
     }
-    return (std::filesystem::path(dir) / (model_name + ext)).string();
+    return (std::filesystem::path(dir) / (model_name + std::string(ext)))
+        .string();
 }
 
 bool ParseArgs(int argc,
@@ -307,51 +280,51 @@ bool ParseArgs(int argc,
 
     if (out_options.dump_requested && out_options.dump_path.empty()) {
         out_options.dump_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_DUMP_DIR, ".dot");
+            out_options.input_path, kDefaultDumpDir, ".dot");
     }
 
     if (out_options.hash_requested && out_options.hash_path.empty()) {
         out_options.hash_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_HASH_DIR, ".hash");
+            out_options.input_path, kDefaultHashDir, ".hash");
     }
 
     if (out_options.emit_mlir_requested && out_options.mlir_path.empty()) {
         out_options.mlir_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_MLIR_DIR, ".mlir");
+            out_options.input_path, kDefaultMlirDir, ".mlir");
     }
 
     if (out_options.emit_metadata_requested &&
         out_options.metadata_path.empty()) {
         out_options.metadata_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_METADATA_DIR, ".json");
+            out_options.input_path, kDefaultMetadataDir, ".json");
     }
 
     if (out_options.emit_llvm_requested && out_options.llvm_path.empty()) {
         out_options.llvm_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_LLVM_DIR, ".ll");
+            out_options.input_path, kDefaultLlvmDir, ".ll");
     }
 
     if (out_options.emit_asm_requested && out_options.asm_path.empty()) {
-        out_options.asm_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_ASM_DIR, ".s");
+        out_options.asm_path =
+            BuildPathByModelName(out_options.input_path, kDefaultAsmDir, ".s");
     }
 
     if ((out_options.emit_object_requested || out_options.emit_exe_requested) &&
         out_options.object_path.empty()) {
         out_options.object_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_OBJECT_DIR, ".o");
+            out_options.input_path, kDefaultObjectDir, ".o");
     }
 
     if (out_options.emit_exe_requested && out_options.exe_path.empty()) {
-        out_options.exe_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_EXE_DIR, "");
+        out_options.exe_path =
+            BuildPathByModelName(out_options.input_path, kDefaultExeDir, "");
     }
 
     if ((out_options.emit_exe_requested ||
          out_options.emit_metadata_requested) &&
         out_options.metadata_path.empty()) {
         out_options.metadata_path = BuildPathByModelName(
-            out_options.input_path, TC_DEFAULT_METADATA_DIR, ".json");
+            out_options.input_path, kDefaultMetadataDir, ".json");
     }
 
     return true;
