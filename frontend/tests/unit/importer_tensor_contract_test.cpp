@@ -14,12 +14,11 @@ std::filesystem::path ModelPath(const std::string& file_name)
 
 TEST(ImporterTensorContract, SingleReluFillsInputAndOutputTensorDtypes)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("single_relu.onnx").string(), model, graph, error))
+        ModelPath("single_relu.onnx").string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_input_tensors().size(), 1u);
@@ -40,12 +39,11 @@ TEST(ImporterTensorContract, SingleReluFillsInputAndOutputTensorDtypes)
 
 TEST(ImporterTensorContract, TwoTransposesFillsAllIoDtypes)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("two_transposes.onnx").string(), model, graph, error))
+        ModelPath("two_transposes.onnx").string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_input_tensors().size(), 1u);

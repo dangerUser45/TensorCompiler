@@ -1,3 +1,4 @@
+#include "onnx.pb.h"
 #include "onnx_importer.hpp"
 #include "op_kind.hpp"
 
@@ -168,12 +169,11 @@ private:
 
 TEST(ImporterOpKind, SingleReluSetsReluKind)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("single_relu.onnx").string(), model, graph, error))
+        ModelPath("single_relu.onnx").string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -183,12 +183,11 @@ TEST(ImporterOpKind, SingleReluSetsReluKind)
 
 TEST(ImporterOpKind, TwoTransposesSetsTransposeKindForAllNodes)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("two_transposes.onnx").string(), model, graph, error))
+        ModelPath("two_transposes.onnx").string(), graph, error))
         << error;
 
     ASSERT_FALSE(graph.get_nodes().empty());
@@ -205,12 +204,11 @@ TEST(ImporterOpKind, MulSetsMulKind)
 {
     const TempModelFile temp_model(BuildBinaryNodeModel("Mul"));
 
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -220,12 +218,11 @@ TEST(ImporterOpKind, MulSetsMulKind)
 
 TEST(ImporterOpKind, ConvFixtureSetsConvAndBiasAddKinds)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("conv_2d_nchw_fchw.onnx").string(), model, graph, error))
+        ModelPath("conv_2d_nchw_fchw.onnx").string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 2u);
@@ -239,12 +236,11 @@ TEST(ImporterOpKind, ReshapeSetsReshapeKind)
 {
     const TempModelFile temp_model(BuildReshapeModel());
 
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -257,12 +253,11 @@ TEST(ImporterOpKind, MaxPoolSetsMaxPoolKind)
 {
     const TempModelFile temp_model(BuildMaxPoolModel());
 
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -273,12 +268,11 @@ TEST(ImporterOpKind, MaxPoolSetsMaxPoolKind)
 
 TEST(ImporterOpKind, MnistModelImportsAllSupportedOperators)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("mnist-8.onnx").string(), model, graph, error))
+        ModelPath("mnist-8.onnx").string(), graph, error))
         << error;
 
     // The MNIST graph contains Reshape, Conv (with auto_pad=SAME_UPPER
@@ -314,12 +308,11 @@ TEST(ImporterOpKind, MnistModelImportsAllSupportedOperators)
 
 TEST(ImporterOpKind, MnistConvNodesNormalizeSameUpperToExplicitPads)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("mnist-8.onnx").string(), model, graph, error))
+        ModelPath("mnist-8.onnx").string(), graph, error))
         << error;
 
     // Both MNIST Convs (kernel=5x5, stride=1, dilation=1, SAME_UPPER) must
@@ -355,11 +348,10 @@ TEST(ImporterOpKind, MnistConvNodesNormalizeSameUpperToExplicitPads)
 
 TEST(ImporterOpKind, UnsupportedModelStillFails)
 {
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        ModelPath("candy-8.onnx").string(), model, graph, error));
+        ModelPath("candy-8.onnx").string(), graph, error));
     EXPECT_NE(error.find("unsupported operator"), std::string::npos) << error;
 }

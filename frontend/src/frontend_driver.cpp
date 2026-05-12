@@ -11,7 +11,6 @@
 #include "graph_verifier.hpp"
 #include "mlir_emitter.hpp"
 #include "model_metadata.hpp"
-#include "onnx.pb.h"
 #include "onnx_importer.hpp"
 
 #if TC_FRONTEND_HAS_BACKEND
@@ -437,10 +436,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    ::onnx::ModelProto model;
     tc::frontend::Graph graph_ir;
     if (!tc::frontend::onnx::ImportOnnxToGraph(
-            options.input_path, model, graph_ir, error)) {
+            options.input_path, graph_ir, error)) {
         PrintStageError("import", error);
         return 1;
     }

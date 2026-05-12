@@ -12,6 +12,7 @@
 #include "graph.hpp"
 #include "mlir_emitter.hpp"
 #include "onnx_importer.hpp"
+#include "onnx.pb.h"
 #include "op_kind.hpp"
 
 namespace {
@@ -453,7 +454,7 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -482,7 +483,7 @@ TEST(MlirEmitter, ReluLoweringUsesZeroConstantInsteadOfIdentityMax)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -507,7 +508,7 @@ TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/two_transposes.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -568,7 +569,7 @@ TEST(MlirEmitter, AddModelRequiresArithmeticAddLowering)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/add.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -660,7 +661,7 @@ TEST(MlirEmitter, MulOnnxModelRequiresArithmeticMulLowering)
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), model, graph, error))
+        temp_model.path().string(), graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -720,7 +721,7 @@ TEST(MlirEmitter, MatMulModelRequiresLinalgMatmulLowering)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/matmul_2d.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -744,7 +745,7 @@ TEST(MlirEmitter, GemmBiasAddLowersWithExplicitBroadcastBeforeAdd)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/matmul_addmm.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -768,7 +769,7 @@ TEST(MlirEmitter, ConvModelLowersToLinalgConvWithInitializerConstants)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -900,7 +901,7 @@ TEST(MlirEmitter, ConvWithZeroPadsOmitsPadsAttribute)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -1065,7 +1066,7 @@ TEST(MlirEmitter, MnistFullGraphEmitsSuccessfully)
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/mnist-8.onnx";
     ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, model, graph, error))
+        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
