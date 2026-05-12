@@ -347,6 +347,77 @@ bool AnyBackendOutputRequested(const Options& options) noexcept
            options.object_path.has_value() || options.exe_path.has_value();
 }
 
+ExitCode RunVerify(tc::frontend::Graph& graph,
+                   bool strict,
+                   bool report_always,
+                   bool& out_verified)
+{
+    tc::frontend::verify::Report report;
+    out_verified =
+        strict ? tc::frontend::verify::VerifyGraphForExecutable(graph, report)
+               : tc::frontend::verify::VerifyGraphForExecution(graph, report);
+    if (report_always || !out_verified) {
+        PrintVerifyReport(report);
+    }
+    return ExitCode::kOk;
+}
+
+ExitCode RunDump(tc::frontend::Graph& graph, const std::string& path)
+{
+    if (!EnsureParentDirExists(path)) {
+        PrintStageError("frontend",
+                        "ERROR: failed to create dump directory for " + path);
+        return ExitCode::kError;
+    }
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        PrintStageError("frontend", "ERROR: failed to open dump file: " + path);
+        return ExitCode::kError;
+    }
+    tc::frontend::DumpGraph dumper(out);
+    dumper.dump(graph);
+    std::cout << "Graph dump written to: " << path << '\n';
+    return ExitCode::kOk;
+}
+
+ExitCode RunHash(tc::frontend::Graph& graph, const std::string& path)
+{
+    if (!EnsureParentDirExists(path)) {
+        PrintStageError("frontend",
+                        "ERROR: failed to create hash directory for " + path);
+        return ExitCode::kError;
+    }
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        PrintStageError("frontend", "ERROR: failed to open hash file: " + path);
+        return ExitCode::kError;
+    }
+    const std::size_t graph_hash = tc::frontend::HashGraph(graph);
+    out << std::hex << std::setfill('0')
+        << std::setw(static_cast<int>(sizeof(std::size_t) * 2)) << graph_hash
+        << '\n';
+    std::cout << "Graph hash written to: " << path << '\n';
+    return ExitCode::kOk;
+}
+
+ExitCode RunEmitMlir(const std::string& path, const std::string& mlir_text)
+{
+    if (!WriteTextFile(path, mlir_text, "frontend")) {
+        return ExitCode::kError;
+    }
+    std::cout << "MLIR written to: " << path << '\n';
+    return ExitCode::kOk;
+}
+
+ExitCode RunEmitMetadata(const std::string& path, const std::string& json)
+{
+    if (!WriteTextFile(path, json, "frontend")) {
+        return ExitCode::kError;
+    }
+    std::cout << "Metadata written to: " << path << '\n';
+    return ExitCode::kOk;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -371,15 +442,10 @@ int main(int argc, char** argv)
     bool verified = true;
     const bool backend_output_requested = AnyBackendOutputRequested(options);
     if (options.verify || options.verify_exec || backend_output_requested) {
-        tc::frontend::verify::Report report;
-        verified = (options.verify_exec || backend_output_requested)
-                       ? tc::frontend::verify::VerifyGraphForExecutable(
-                             graph_ir, report)
-                       : tc::frontend::verify::VerifyGraphForExecution(graph_ir,
-                                                                       report);
-        if (options.verify || options.verify_exec || !verified) {
-            PrintVerifyReport(report);
-        }
+        RunVerify(graph_ir,
+                  /*strict=*/options.verify_exec || backend_output_requested,
+                  /*report_always=*/options.verify || options.verify_exec,
+                  verified);
     }
 
     if (backend_output_requested && !verified) {
@@ -419,68 +485,33 @@ int main(int argc, char** argv)
     };
 
     if (options.dump_path) {
-        if (!EnsureParentDirExists(*options.dump_path)) {
-            PrintStageError("frontend",
-                            "ERROR: failed to create dump directory for " +
-                                *options.dump_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        std::ofstream out(*options.dump_path, std::ios::out | std::ios::trunc);
-        if (!out.is_open()) {
-            PrintStageError("frontend",
-                            "ERROR: failed to open dump file: " +
-                                *options.dump_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-        tc::frontend::DumpGraph dumper(out);
-        dumper.dump(graph_ir);
-        std::cout << "Graph dump written to: " << *options.dump_path << '\n';
+        const ExitCode rc = RunDump(graph_ir, *options.dump_path);
+        if (rc != ExitCode::kOk)
+            return static_cast<int>(rc);
     }
 
     if (options.hash_path) {
-        if (!EnsureParentDirExists(*options.hash_path)) {
-            PrintStageError("frontend",
-                            "ERROR: failed to create hash directory for " +
-                                *options.hash_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        std::ofstream out(*options.hash_path, std::ios::out | std::ios::trunc);
-        if (!out.is_open()) {
-            PrintStageError("frontend",
-                            "ERROR: failed to open hash file: " +
-                                *options.hash_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        const std::size_t graph_hash = tc::frontend::HashGraph(graph_ir);
-        out << std::hex << std::setfill('0')
-            << std::setw(static_cast<int>(sizeof(std::size_t) * 2))
-            << graph_hash << '\n';
-        std::cout << "Graph hash written to: " << *options.hash_path << '\n';
+        const ExitCode rc = RunHash(graph_ir, *options.hash_path);
+        if (rc != ExitCode::kOk)
+            return static_cast<int>(rc);
     }
 
     if (options.mlir_path) {
         const std::string* text = get_mlir_text();
-        if (text == nullptr) {
+        if (text == nullptr)
             return static_cast<int>(ExitCode::kError);
-        }
-        if (!WriteTextFile(*options.mlir_path, *text, "frontend")) {
-            return static_cast<int>(ExitCode::kError);
-        }
-        std::cout << "MLIR written to: " << *options.mlir_path << '\n';
+        const ExitCode rc = RunEmitMlir(*options.mlir_path, *text);
+        if (rc != ExitCode::kOk)
+            return static_cast<int>(rc);
     }
 
     if (options.metadata_path) {
         const std::string* json = get_metadata_json();
-        if (json == nullptr) {
+        if (json == nullptr)
             return static_cast<int>(ExitCode::kError);
-        }
-        if (!WriteTextFile(*options.metadata_path, *json, "frontend")) {
-            return static_cast<int>(ExitCode::kError);
-        }
-        std::cout << "Metadata written to: " << *options.metadata_path << '\n';
+        const ExitCode rc = RunEmitMetadata(*options.metadata_path, *json);
+        if (rc != ExitCode::kOk)
+            return static_cast<int>(rc);
     }
 
     if (backend_output_requested) {
