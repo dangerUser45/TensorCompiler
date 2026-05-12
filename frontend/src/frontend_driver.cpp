@@ -1,8 +1,10 @@
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <getopt.h>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -45,26 +47,18 @@ enum class ExitCode : int
 struct Options final
 {
     std::string input_path;
-    std::string dump_path;
-    std::string hash_path;
-    std::string mlir_path;
-    std::string metadata_path;
-    std::string llvm_path;
-    std::string asm_path;
-    std::string object_path;
-    std::string exe_path;
+    std::optional<std::string> dump_path;
+    std::optional<std::string> hash_path;
+    std::optional<std::string> mlir_path;
+    std::optional<std::string> metadata_path;
+    std::optional<std::string> llvm_path;
+    std::optional<std::string> asm_path;
+    std::optional<std::string> object_path;
+    std::optional<std::string> exe_path;
     std::string target_triple;
     std::string pass_pipeline;
     bool verify = false;
     bool verify_exec = false;
-    bool dump_requested = false;
-    bool hash_requested = false;
-    bool emit_mlir_requested = false;
-    bool emit_metadata_requested = false;
-    bool emit_llvm_requested = false;
-    bool emit_asm_requested = false;
-    bool emit_object_requested = false;
-    bool emit_exe_requested = false;
 };
 
 inline std::string BuildUsage(const char* argv0)
@@ -118,6 +112,26 @@ bool ParseArgs(int argc,
     opterr = 0;
     optind = 1;
 
+    auto set_opt_path = [&](std::optional<std::string>& slot,
+                            std::string_view flag_name) -> bool {
+        if (slot.has_value()) {
+            out_error = std::string("ERROR: --") + std::string(flag_name) +
+                        " specified more than once";
+            return false;
+        }
+        if (optarg == nullptr) {
+            slot = std::string{};
+            return true;
+        }
+        if (*optarg == '\0') {
+            out_error = std::string("ERROR: --") + std::string(flag_name) +
+                        " path is empty";
+            return false;
+        }
+        slot = std::string(optarg);
+        return true;
+    };
+
     int opt = 0;
     while ((opt = getopt_long(
                 argc, argv, "vd::h::m::M::", kLongOptions, nullptr)) != -1) {
@@ -129,84 +143,36 @@ bool ParseArgs(int argc,
                 out_options.verify_exec = true;
                 break;
             case 'd':
-                out_options.dump_requested = true;
-                if (optarg != nullptr) {
-                    out_options.dump_path = optarg;
-                    if (out_options.dump_path.empty()) {
-                        out_error = "ERROR: --dump path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.dump_path, "dump"))
+                    return false;
                 break;
             case 'h':
-                out_options.hash_requested = true;
-                if (optarg != nullptr) {
-                    out_options.hash_path = optarg;
-                    if (out_options.hash_path.empty()) {
-                        out_error = "ERROR: --hash path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.hash_path, "hash"))
+                    return false;
                 break;
             case 'm':
-                out_options.emit_mlir_requested = true;
-                if (optarg != nullptr) {
-                    out_options.mlir_path = optarg;
-                    if (out_options.mlir_path.empty()) {
-                        out_error = "ERROR: --emit-mlir path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.mlir_path, "emit-mlir"))
+                    return false;
                 break;
             case 'M':
-                out_options.emit_metadata_requested = true;
-                if (optarg != nullptr) {
-                    out_options.metadata_path = optarg;
-                    if (out_options.metadata_path.empty()) {
-                        out_error = "ERROR: --emit-metadata path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.metadata_path, "emit-metadata"))
+                    return false;
                 break;
             case kEmitLlvm:
-                out_options.emit_llvm_requested = true;
-                if (optarg != nullptr) {
-                    out_options.llvm_path = optarg;
-                    if (out_options.llvm_path.empty()) {
-                        out_error = "ERROR: --emit-llvm path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.llvm_path, "emit-llvm"))
+                    return false;
                 break;
             case kEmitAsm:
-                out_options.emit_asm_requested = true;
-                if (optarg != nullptr) {
-                    out_options.asm_path = optarg;
-                    if (out_options.asm_path.empty()) {
-                        out_error = "ERROR: --emit-asm path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.asm_path, "emit-asm"))
+                    return false;
                 break;
             case kEmitObject:
-                out_options.emit_object_requested = true;
-                if (optarg != nullptr) {
-                    out_options.object_path = optarg;
-                    if (out_options.object_path.empty()) {
-                        out_error = "ERROR: --emit-object path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.object_path, "emit-object"))
+                    return false;
                 break;
             case kEmitExe:
-                out_options.emit_exe_requested = true;
-                if (optarg != nullptr) {
-                    out_options.exe_path = optarg;
-                    if (out_options.exe_path.empty()) {
-                        out_error = "ERROR: --emit-exe path is empty";
-                        return false;
-                    }
-                }
+                if (!set_opt_path(out_options.exe_path, "emit-exe"))
+                    return false;
                 break;
             case kTarget:
                 out_options.target_triple = optarg == nullptr ? "" : optarg;
@@ -237,38 +203,31 @@ bool ParseArgs(int argc,
     ++optind;
 
     if (optind < argc && (argc - optind) == 1) {
-        std::string* unresolved_output_path = nullptr;
+        std::optional<std::string>* unresolved_slot = nullptr;
         std::size_t unresolved_count = 0;
-
-        auto mark_if_unresolved = [&](bool requested, std::string& path) {
-            if (requested && path.empty()) {
-                unresolved_output_path = &path;
+        auto mark = [&](std::optional<std::string>& slot) {
+            if (slot.has_value() && slot->empty()) {
+                unresolved_slot = &slot;
                 ++unresolved_count;
             }
         };
-        mark_if_unresolved(out_options.dump_requested, out_options.dump_path);
-        mark_if_unresolved(out_options.hash_requested, out_options.hash_path);
-        mark_if_unresolved(out_options.emit_mlir_requested,
-                           out_options.mlir_path);
-        mark_if_unresolved(out_options.emit_metadata_requested,
-                           out_options.metadata_path);
-        mark_if_unresolved(out_options.emit_llvm_requested,
-                           out_options.llvm_path);
-        mark_if_unresolved(out_options.emit_asm_requested,
-                           out_options.asm_path);
-        mark_if_unresolved(out_options.emit_object_requested,
-                           out_options.object_path);
-        mark_if_unresolved(out_options.emit_exe_requested,
-                           out_options.exe_path);
+        mark(out_options.dump_path);
+        mark(out_options.hash_path);
+        mark(out_options.mlir_path);
+        mark(out_options.metadata_path);
+        mark(out_options.llvm_path);
+        mark(out_options.asm_path);
+        mark(out_options.object_path);
+        mark(out_options.exe_path);
 
         if (unresolved_count == 1) {
-            *unresolved_output_path = argv[optind];
+            *unresolved_slot = argv[optind];
             ++optind;
         } else if (unresolved_count > 1) {
-            out_error = "ERROR: ambiguous output path; use explicit "
-                        "--dump=, --hash=, --emit-mlir= or "
-                        "--emit-metadata=, --emit-llvm=, --emit-asm=, "
-                        "--emit-object= or --emit-exe=";
+            out_error =
+                "ERROR: ambiguous output path; use explicit "
+                "--dump=, --hash=, --emit-mlir=, --emit-metadata=, "
+                "--emit-llvm=, --emit-asm=, --emit-object= or --emit-exe=";
             return false;
         }
     }
@@ -278,51 +237,37 @@ bool ParseArgs(int argc,
         return false;
     }
 
-    if (out_options.dump_requested && out_options.dump_path.empty()) {
-        out_options.dump_path = BuildPathByModelName(
-            out_options.input_path, kDefaultDumpDir, ".dot");
+    struct PathDefault
+    {
+        std::optional<std::string>& slot;
+        std::string_view dir;
+        std::string_view ext;
+    };
+    const std::array<PathDefault, 8> path_defaults{ {
+        { out_options.dump_path, kDefaultDumpDir, ".dot" },
+        { out_options.hash_path, kDefaultHashDir, ".hash" },
+        { out_options.mlir_path, kDefaultMlirDir, ".mlir" },
+        { out_options.metadata_path, kDefaultMetadataDir, ".json" },
+        { out_options.llvm_path, kDefaultLlvmDir, ".ll" },
+        { out_options.asm_path, kDefaultAsmDir, ".s" },
+        { out_options.object_path, kDefaultObjectDir, ".o" },
+        { out_options.exe_path, kDefaultExeDir, "" },
+    } };
+    for (const auto& d : path_defaults) {
+        if (d.slot.has_value() && d.slot->empty()) {
+            *d.slot =
+                BuildPathByModelName(out_options.input_path, d.dir, d.ext);
+        }
     }
 
-    if (out_options.hash_requested && out_options.hash_path.empty()) {
-        out_options.hash_path = BuildPathByModelName(
-            out_options.input_path, kDefaultHashDir, ".hash");
-    }
-
-    if (out_options.emit_mlir_requested && out_options.mlir_path.empty()) {
-        out_options.mlir_path = BuildPathByModelName(
-            out_options.input_path, kDefaultMlirDir, ".mlir");
-    }
-
-    if (out_options.emit_metadata_requested &&
-        out_options.metadata_path.empty()) {
-        out_options.metadata_path = BuildPathByModelName(
-            out_options.input_path, kDefaultMetadataDir, ".json");
-    }
-
-    if (out_options.emit_llvm_requested && out_options.llvm_path.empty()) {
-        out_options.llvm_path = BuildPathByModelName(
-            out_options.input_path, kDefaultLlvmDir, ".ll");
-    }
-
-    if (out_options.emit_asm_requested && out_options.asm_path.empty()) {
-        out_options.asm_path =
-            BuildPathByModelName(out_options.input_path, kDefaultAsmDir, ".s");
-    }
-
-    if ((out_options.emit_object_requested || out_options.emit_exe_requested) &&
-        out_options.object_path.empty()) {
+    // --emit-exe implies object and metadata defaults if not already requested.
+    if (out_options.exe_path.has_value() &&
+        !out_options.object_path.has_value()) {
         out_options.object_path = BuildPathByModelName(
             out_options.input_path, kDefaultObjectDir, ".o");
     }
-
-    if (out_options.emit_exe_requested && out_options.exe_path.empty()) {
-        out_options.exe_path =
-            BuildPathByModelName(out_options.input_path, kDefaultExeDir, "");
-    }
-
-    if ((out_options.emit_exe_requested ||
-         out_options.emit_metadata_requested) &&
-        out_options.metadata_path.empty()) {
+    if (out_options.exe_path.has_value() &&
+        !out_options.metadata_path.has_value()) {
         out_options.metadata_path = BuildPathByModelName(
             out_options.input_path, kDefaultMetadataDir, ".json");
     }
@@ -398,8 +343,8 @@ bool WriteTextFile(const std::string& file_path,
 
 bool AnyBackendOutputRequested(const Options& options) noexcept
 {
-    return options.emit_llvm_requested || options.emit_asm_requested ||
-           options.emit_object_requested || options.emit_exe_requested;
+    return options.llvm_path.has_value() || options.asm_path.has_value() ||
+           options.object_path.has_value() || options.exe_path.has_value();
 }
 
 } // namespace
@@ -441,39 +386,39 @@ int main(int argc, char** argv)
         return static_cast<int>(ExitCode::kVerifyFailed);
     }
 
-    if (options.dump_requested) {
-        if (!EnsureParentDirExists(options.dump_path)) {
+    if (options.dump_path) {
+        if (!EnsureParentDirExists(*options.dump_path)) {
             PrintStageError("frontend",
                             "ERROR: failed to create dump directory for " +
-                                options.dump_path);
+                                *options.dump_path);
             return static_cast<int>(ExitCode::kError);
         }
 
-        std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
+        std::ofstream out(*options.dump_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
             PrintStageError("frontend",
                             "ERROR: failed to open dump file: " +
-                                options.dump_path);
+                                *options.dump_path);
             return static_cast<int>(ExitCode::kError);
         }
         tc::frontend::DumpGraph dumper(out);
         dumper.dump(graph_ir);
-        std::cout << "Graph dump written to: " << options.dump_path << '\n';
+        std::cout << "Graph dump written to: " << *options.dump_path << '\n';
     }
 
-    if (options.hash_requested) {
-        if (!EnsureParentDirExists(options.hash_path)) {
+    if (options.hash_path) {
+        if (!EnsureParentDirExists(*options.hash_path)) {
             PrintStageError("frontend",
                             "ERROR: failed to create hash directory for " +
-                                options.hash_path);
+                                *options.hash_path);
             return static_cast<int>(ExitCode::kError);
         }
 
-        std::ofstream out(options.hash_path, std::ios::out | std::ios::trunc);
+        std::ofstream out(*options.hash_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
             PrintStageError("frontend",
                             "ERROR: failed to open hash file: " +
-                                options.hash_path);
+                                *options.hash_path);
             return static_cast<int>(ExitCode::kError);
         }
 
@@ -481,14 +426,14 @@ int main(int argc, char** argv)
         out << std::hex << std::setfill('0')
             << std::setw(static_cast<int>(sizeof(std::size_t) * 2))
             << graph_hash << '\n';
-        std::cout << "Graph hash written to: " << options.hash_path << '\n';
+        std::cout << "Graph hash written to: " << *options.hash_path << '\n';
     }
 
-    if (options.emit_mlir_requested) {
-        if (!EnsureParentDirExists(options.mlir_path)) {
+    if (options.mlir_path) {
+        if (!EnsureParentDirExists(*options.mlir_path)) {
             PrintStageError("backend",
                             "ERROR: failed to create mlir directory for " +
-                                options.mlir_path);
+                                *options.mlir_path);
             return static_cast<int>(ExitCode::kError);
         }
 
@@ -500,11 +445,11 @@ int main(int argc, char** argv)
             return static_cast<int>(ExitCode::kError);
         }
 
-        std::ofstream out(options.mlir_path, std::ios::out | std::ios::trunc);
+        std::ofstream out(*options.mlir_path, std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
             PrintStageError("backend",
                             "ERROR: failed to open mlir file: " +
-                                options.mlir_path);
+                                *options.mlir_path);
             return static_cast<int>(ExitCode::kError);
         }
 
@@ -512,17 +457,17 @@ int main(int argc, char** argv)
         if (!out.good()) {
             PrintStageError("backend",
                             "ERROR: failed to write mlir file: " +
-                                options.mlir_path);
+                                *options.mlir_path);
             return static_cast<int>(ExitCode::kError);
         }
-        std::cout << "MLIR written to: " << options.mlir_path << '\n';
+        std::cout << "MLIR written to: " << *options.mlir_path << '\n';
     }
 
-    if (options.emit_metadata_requested) {
-        if (!EnsureParentDirExists(options.metadata_path)) {
+    if (options.metadata_path) {
+        if (!EnsureParentDirExists(*options.metadata_path)) {
             PrintStageError("frontend",
                             "ERROR: failed to create metadata directory for " +
-                                options.metadata_path);
+                                *options.metadata_path);
             return static_cast<int>(ExitCode::kError);
         }
 
@@ -535,22 +480,22 @@ int main(int argc, char** argv)
             return static_cast<int>(ExitCode::kError);
         }
 
-        std::ofstream out(options.metadata_path,
+        std::ofstream out(*options.metadata_path,
                           std::ios::out | std::ios::trunc);
         if (!out.is_open()) {
             PrintStageError("frontend",
                             "ERROR: failed to open metadata file: " +
-                                options.metadata_path);
+                                *options.metadata_path);
             return static_cast<int>(ExitCode::kError);
         }
         out << metadata_json;
         if (!out.good()) {
             PrintStageError("frontend",
                             "ERROR: failed to write metadata file: " +
-                                options.metadata_path);
+                                *options.metadata_path);
             return static_cast<int>(ExitCode::kError);
         }
-        std::cout << "Metadata written to: " << options.metadata_path << '\n';
+        std::cout << "Metadata written to: " << *options.metadata_path << '\n';
     }
 
     if (backend_output_requested) {
@@ -569,7 +514,7 @@ int main(int argc, char** argv)
         }
 
         tc::backend::BackendDiagnostic backend_diagnostic;
-        if (options.emit_llvm_requested) {
+        if (options.llvm_path) {
             std::string llvm_ir;
             if (!tc::backend::EmitLlvmIrFromMlirText(mlir_text,
                                                      options.input_path,
@@ -582,13 +527,13 @@ int main(int argc, char** argv)
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
                 return static_cast<int>(ExitCode::kError);
             }
-            if (!WriteTextFile(options.llvm_path, llvm_ir, "backend")) {
+            if (!WriteTextFile(*options.llvm_path, llvm_ir, "backend")) {
                 return static_cast<int>(ExitCode::kError);
             }
-            std::cout << "LLVM IR written to: " << options.llvm_path << '\n';
+            std::cout << "LLVM IR written to: " << *options.llvm_path << '\n';
         }
 
-        if (options.emit_asm_requested) {
+        if (options.asm_path) {
             std::string asm_text;
             if (!tc::backend::EmitAsmFromMlirText(mlir_text,
                                                   options.input_path,
@@ -601,28 +546,28 @@ int main(int argc, char** argv)
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
                 return static_cast<int>(ExitCode::kError);
             }
-            if (!WriteTextFile(options.asm_path, asm_text, "backend")) {
+            if (!WriteTextFile(*options.asm_path, asm_text, "backend")) {
                 return static_cast<int>(ExitCode::kError);
             }
-            std::cout << "ASM written to: " << options.asm_path << '\n';
+            std::cout << "ASM written to: " << *options.asm_path << '\n';
         }
 
-        if (options.emit_object_requested || options.emit_exe_requested) {
+        if (options.object_path) {
             if (!tc::backend::EmitObjectFromMlirText(mlir_text,
                                                      options.input_path,
                                                      options.pass_pipeline,
                                                      options.target_triple,
-                                                     options.object_path,
+                                                     *options.object_path,
                                                      backend_diagnostic)) {
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
                 return static_cast<int>(ExitCode::kError);
             }
-            std::cout << "Object written to: " << options.object_path << '\n';
+            std::cout << "Object written to: " << *options.object_path << '\n';
         }
 
-        if (options.emit_exe_requested) {
+        if (options.exe_path) {
             std::string metadata_json;
             if (!tc::frontend::metadata::BuildMetadataJson(
                     graph_ir, metadata_json, error)) {
@@ -632,22 +577,22 @@ int main(int argc, char** argv)
                 return static_cast<int>(ExitCode::kError);
             }
             if (!WriteTextFile(
-                    options.metadata_path, metadata_json, "frontend")) {
+                    *options.metadata_path, metadata_json, "frontend")) {
                 return static_cast<int>(ExitCode::kError);
             }
-            std::cout << "Metadata written to: " << options.metadata_path
+            std::cout << "Metadata written to: " << *options.metadata_path
                       << '\n';
 
-            if (!tc::backend::LinkExecutableWithRuntime(options.object_path,
-                                                        options.metadata_path,
-                                                        options.exe_path,
+            if (!tc::backend::LinkExecutableWithRuntime(*options.object_path,
+                                                        *options.metadata_path,
+                                                        *options.exe_path,
                                                         backend_diagnostic)) {
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
                 return static_cast<int>(ExitCode::kError);
             }
-            std::cout << "Executable written to: " << options.exe_path << '\n';
+            std::cout << "Executable written to: " << *options.exe_path << '\n';
         }
 #endif
     }
