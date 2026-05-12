@@ -8,12 +8,49 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
-#include <unordered_set>
 
 #include "dump_style.hpp"
 
 namespace tc::frontend {
+
+namespace {
+
+template<typename ValSource, typename Fn>
+std::string dispatch_typed(const ValSource& src, Fn fn, std::string fallback)
+{
+    try {
+        switch (src.get_data_type().id) {
+            case DataID::INT8:
+                return fn(src.template get_values<int8_t>());
+            case DataID::INT16:
+                return fn(src.template get_values<int16_t>());
+            case DataID::INT32:
+                return fn(src.template get_values<int32_t>());
+            case DataID::INT64:
+                return fn(src.template get_values<int64_t>());
+            case DataID::UNSIGNED_INT8:
+                return fn(src.template get_values<uint8_t>());
+            case DataID::UNSIGNED_INT16:
+                return fn(src.template get_values<uint16_t>());
+            case DataID::UNSIGNED_INT32:
+                return fn(src.template get_values<uint32_t>());
+            case DataID::UNSIGNED_INT64:
+                return fn(src.template get_values<uint64_t>());
+            case DataID::FLOAT:
+                return fn(src.template get_values<float>());
+            case DataID::DOUBLE:
+                return fn(src.template get_values<double>());
+            case DataID::STRING:
+                return fn(src.template get_values<std::string>());
+            default:
+                return fallback;
+        }
+    } catch (...) {
+        return fallback;
+    }
+}
+
+} // anonymous namespace
 
 DumpGraph::DumpGraph(std::ofstream& out)
   : out_(out)
@@ -217,105 +254,24 @@ int64_t DumpGraph::element_count(const std::vector<int64_t>& shape)
 
 std::string DumpGraph::init_values_as_string(const Initializers& init)
 {
-    try {
-        switch (init.get_data_type().id) {
-            case DataID::INT8:
-                return print_vector(init.get_values<int8_t>());
-            case DataID::INT16:
-                return print_vector(init.get_values<int16_t>());
-            case DataID::INT32:
-                return print_vector(init.get_values<int32_t>());
-            case DataID::INT64:
-                return print_vector(init.get_values<int64_t>());
-            case DataID::UNSIGNED_INT8:
-                return print_vector(init.get_values<uint8_t>());
-            case DataID::UNSIGNED_INT16:
-                return print_vector(init.get_values<uint16_t>());
-            case DataID::UNSIGNED_INT32:
-                return print_vector(init.get_values<uint32_t>());
-            case DataID::UNSIGNED_INT64:
-                return print_vector(init.get_values<uint64_t>());
-            case DataID::FLOAT:
-                return print_vector(init.get_values<float>());
-            case DataID::DOUBLE:
-                return print_vector(init.get_values<double>());
-            case DataID::STRING:
-                return print_vector(init.get_values<std::string>());
-            default:
-                return "(unknown)";
-        }
-    } catch (...) {
-        return "(unknown)";
-    }
+    return dispatch_typed(
+        init, [this](const auto& v) { return print_vector(v); }, "(unknown)");
 }
 
 std::string DumpGraph::init_values_as_multiline_html(const Initializers& init)
 {
-    try {
-        switch (init.get_data_type().id) {
-            case DataID::INT8:
-                return print_vector_multiline_html(init.get_values<int8_t>());
-            case DataID::INT16:
-                return print_vector_multiline_html(init.get_values<int16_t>());
-            case DataID::INT32:
-                return print_vector_multiline_html(init.get_values<int32_t>());
-            case DataID::INT64:
-                return print_vector_multiline_html(init.get_values<int64_t>());
-            case DataID::UNSIGNED_INT8:
-                return print_vector_multiline_html(init.get_values<uint8_t>());
-            case DataID::UNSIGNED_INT16:
-                return print_vector_multiline_html(init.get_values<uint16_t>());
-            case DataID::UNSIGNED_INT32:
-                return print_vector_multiline_html(init.get_values<uint32_t>());
-            case DataID::UNSIGNED_INT64:
-                return print_vector_multiline_html(init.get_values<uint64_t>());
-            case DataID::FLOAT:
-                return print_vector_multiline_html(init.get_values<float>());
-            case DataID::DOUBLE:
-                return print_vector_multiline_html(init.get_values<double>());
-            case DataID::STRING:
-                return print_vector_multiline_html(
-                    init.get_values<std::string>());
-            default:
-                return "(unknown)";
-        }
-    } catch (...) {
-        return "(unknown)";
-    }
+    return dispatch_typed(
+        init,
+        [this](const auto& v) { return print_vector_multiline_html(v); },
+        "(unknown)");
 }
 
 std::string DumpGraph::attr_values_as_string(const Attribute& attr)
 {
-    try {
-        switch (attr.get_data_type().id) {
-            case DataID::INT8:
-                return print_vector(attr.get_values<int8_t>());
-            case DataID::INT16:
-                return print_vector(attr.get_values<int16_t>());
-            case DataID::INT32:
-                return print_vector(attr.get_values<int32_t>());
-            case DataID::INT64:
-                return print_vector(attr.get_values<int64_t>());
-            case DataID::UNSIGNED_INT8:
-                return print_vector(attr.get_values<uint8_t>());
-            case DataID::UNSIGNED_INT16:
-                return print_vector(attr.get_values<uint16_t>());
-            case DataID::UNSIGNED_INT32:
-                return print_vector(attr.get_values<uint32_t>());
-            case DataID::UNSIGNED_INT64:
-                return print_vector(attr.get_values<uint64_t>());
-            case DataID::FLOAT:
-                return print_vector(attr.get_values<float>());
-            case DataID::DOUBLE:
-                return print_vector(attr.get_values<double>());
-            case DataID::STRING:
-                return print_vector(attr.get_values<std::string>());
-            default:
-                return "(" + attr.get_data_type().data_type_str + ")";
-        }
-    } catch (...) {
-        return "(" + attr.get_data_type().data_type_str + ")";
-    }
+    return dispatch_typed(
+        attr,
+        [this](const auto& v) { return print_vector(v); },
+        "(" + attr.get_data_type().data_type_str + ")");
 }
 
 int DumpGraph::edge_minlen_from_label(const std::string& label)
@@ -399,6 +355,35 @@ void DumpGraph::print_inits(const Graph::InitVecT& inits)
     }
 }
 
+void DumpGraph::print_node_attrs(const Node& node)
+{
+    const auto& attrs = node.get_attrs();
+    if (attrs.empty()) {
+        out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR
+             << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t";
+        return;
+    }
+
+    out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR
+         << "\"><TABLE BORDER=\"0\" CELLBORDER=\"1\" "
+            "CELLSPACING=\"0\" CELLPADDING=\"5\">\n\t\t\t\t\t"
+            "<TR><TD BGCOLOR=\""
+         << ATTR_HEADER_COLOR << "\"><B>ATTRIBUTES</B></TD></TR>\n\t\t\t\t\t";
+
+    for (size_t j = 0; j != attrs.size(); ++j) {
+        if (!attrs[j])
+            continue;
+        out_ << "<TR><TD BGCOLOR=\"" << ATTR_BASE_COLOR << "\"><B>"
+             << attrs[j]->get_name()
+             << "</B>: " << attr_values_as_string(*attrs[j])
+             << "</TD></TR>\n\t\t\t\t";
+        if (j != attrs.size() - 1)
+            out_ << "\t";
+    }
+
+    out_ << "</TABLE></TD></TR>\n\t\t\t";
+}
+
 void DumpGraph::print_op_nodes(const Graph::NodeVecT& nodes)
 {
     out_ << "// ===== NODES =====\n\t";
@@ -426,51 +411,13 @@ void DumpGraph::print_op_nodes(const Graph::NodeVecT& nodes)
              << print_names_multiline_html(nodes[i]->get_outputs())
              << "</TD></TR>\n\t\t\t\t";
 
-        const auto& attrs = nodes[i]->get_attrs();
-        if (attrs.empty()) {
-            out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR
-                 << "\"><B>attributes</B>: (none)</TD></TR>\n\t\t\t";
-        } else {
-            out_ << "<TR><TD BGCOLOR=\"" << OPERAT_BASE_COLOR
-                 << "\"><TABLE BORDER=\"0\" CELLBORDER=\"1\" "
-                    "CELLSPACING=\"0\" CELLPADDING=\"5\">\n\t\t\t\t\t"
-                    "<TR><TD BGCOLOR=\""
-                 << ATTR_HEADER_COLOR
-                 << "\"><B>ATTRIBUTES</B></TD></TR>\n\t\t\t\t\t";
-
-            for (size_t j = 0; j != attrs.size(); ++j) {
-                if (!attrs[j])
-                    continue;
-                out_ << "<TR><TD BGCOLOR=\"" << ATTR_BASE_COLOR << "\"><B>"
-                     << attrs[j]->get_name()
-                     << "</B>: " << attr_values_as_string(*attrs[j])
-                     << "</TD></TR>\n\t\t\t\t";
-                if (j != attrs.size() - 1)
-                    out_ << "\t";
-            }
-
-            out_ << "</TABLE></TD></TR>\n\t\t\t";
-        }
+        print_node_attrs(*nodes[i]);
         end_table();
     }
 }
 
-void DumpGraph::set_rank(const Graph::TensVecT& inputs,
-                         const Graph::InitVecT& inits,
-                         const Graph::NodeVecT& nodes,
-                         const Graph::TensVecT& outputs)
+void DumpGraph::emit_rank_inputs(const Graph::TensVecT& inputs)
 {
-    std::unordered_map<std::string, std::string> init_name_to_id;
-    for (size_t i = 0; i != inits.size(); ++i) {
-        if (!inits[i])
-            continue;
-        const std::string init_name = normalize_name(inits[i]->get_name());
-        init_name_to_id[init_name] = tensor_id(*inits[i], "init", i);
-    }
-
-    std::unordered_set<std::string> ranked_inits;
-
-    out_ << "// ===== LAYERED ALIGNMENT (rank=same) =====\n\t";
     out_ << "{ rank=same; ";
     for (size_t i = 0; i != inputs.size(); ++i) {
         if (!inputs[i])
@@ -478,24 +425,38 @@ void DumpGraph::set_rank(const Graph::TensVecT& inputs,
         out_ << tensor_id(*inputs[i], "input", i) << "; ";
     }
     out_ << "}\n\t";
+}
 
+void DumpGraph::emit_rank_nodes(const Graph::NodeVecT& nodes,
+                                const Graph::InitVecT& inits)
+{
+    std::unordered_map<std::string, std::string> init_id_map;
+    for (size_t i = 0; i != inits.size(); ++i) {
+        if (!inits[i])
+            continue;
+        init_id_map[normalize_name(inits[i]->get_name())] =
+            tensor_id(*inits[i], "init", i);
+    }
+
+    std::unordered_set<std::string> ranked_inits;
     for (size_t i = 0; i != nodes.size(); ++i) {
         if (!nodes[i])
             continue;
 
         out_ << "{ rank=same; ";
-        for (const std::string& raw_input_name : nodes[i]->get_inputs()) {
-            const std::string input_name = normalize_name(raw_input_name);
-            const auto it = init_name_to_id.find(input_name);
-            if (it == init_name_to_id.end())
+        for (const std::string& raw : nodes[i]->get_inputs()) {
+            const auto it = init_id_map.find(normalize_name(raw));
+            if (it == init_id_map.end())
                 continue;
-            if (ranked_inits.insert(it->second).second) {
+            if (ranked_inits.insert(it->second).second)
                 out_ << it->second << "; ";
-            }
         }
         out_ << node_id(*nodes[i], i) << "; }\n\t";
     }
+}
 
+void DumpGraph::emit_rank_outputs(const Graph::TensVecT& outputs)
+{
     out_ << "{ rank=same; ";
     for (size_t i = 0; i != outputs.size(); ++i) {
         if (!outputs[i])
@@ -505,79 +466,96 @@ void DumpGraph::set_rank(const Graph::TensVecT& inputs,
     out_ << "}\n\n\t";
 }
 
+void DumpGraph::set_rank(const Graph::TensVecT& inputs,
+                         const Graph::InitVecT& inits,
+                         const Graph::NodeVecT& nodes,
+                         const Graph::TensVecT& outputs)
+{
+    out_ << "// ===== LAYERED ALIGNMENT (rank=same) =====\n\t";
+    emit_rank_inputs(inputs);
+    emit_rank_nodes(nodes, inits);
+    emit_rank_outputs(outputs);
+}
+
+void DumpGraph::emit_node_edges(size_t idx,
+                                const Node& node,
+                                ProducerMap& producers,
+                                std::unordered_set<std::string>& printed)
+{
+    const std::string nid = node_id(node, idx);
+
+    for (const std::string& raw : node.get_inputs()) {
+        const std::string name = normalize_name(raw);
+        const auto prod_it = producers.find(name);
+        if (prod_it == producers.end())
+            continue;
+
+        const std::string edge_key = prod_it->second + "->" + nid + ":" + name;
+        if (!printed.insert(edge_key).second)
+            continue;
+
+        out_ << prod_it->second << " -> " << nid << " [xlabel=\"" << name
+             << "\", minlen=" << edge_minlen_from_label(name) << "];\n\t";
+    }
+
+    for (const std::string& raw : node.get_outputs())
+        producers[normalize_name(raw)] = nid;
+}
+
+void DumpGraph::emit_graph_output_edges(
+    const Graph::TensVecT& outputs,
+    const ProducerMap& producers,
+    std::unordered_set<std::string>& printed)
+{
+    for (size_t i = 0; i != outputs.size(); ++i) {
+        if (!outputs[i])
+            continue;
+
+        const std::string out_name = normalize_name(outputs[i]->get_name());
+        const auto prod_it = producers.find(out_name);
+        if (prod_it == producers.end())
+            continue;
+
+        const std::string out_id = tensor_id(*outputs[i], "output", i);
+        const std::string edge_key =
+            prod_it->second + "->" + out_id + ":" + out_name;
+        if (!printed.insert(edge_key).second)
+            continue;
+
+        out_ << prod_it->second << " -> " << out_id << " [xlabel=\"" << out_name
+             << "\", minlen=" << edge_minlen_from_label(out_name) << "];\n";
+        if (i != outputs.size() - 1)
+            out_ << "\t";
+    }
+}
+
 void DumpGraph::set_links(const Graph::TensVecT& inputs,
                           const Graph::InitVecT& inits,
                           const Graph::NodeVecT& nodes,
                           const Graph::TensVecT& outputs)
 {
-    std::unordered_map<std::string, std::string> producer_by_tensor;
-    std::unordered_set<std::string> printed_edges;
-
+    ProducerMap producers;
     for (size_t i = 0; i != inputs.size(); ++i) {
         if (!inputs[i])
             continue;
-        const std::string input_name = normalize_name(inputs[i]->get_name());
-        producer_by_tensor[input_name] = tensor_id(*inputs[i], "input", i);
+        producers[normalize_name(inputs[i]->get_name())] =
+            tensor_id(*inputs[i], "input", i);
     }
-
     for (size_t i = 0; i != inits.size(); ++i) {
         if (!inits[i])
             continue;
-        const std::string init_name = normalize_name(inits[i]->get_name());
-        producer_by_tensor[init_name] = tensor_id(*inits[i], "init", i);
+        producers[normalize_name(inits[i]->get_name())] =
+            tensor_id(*inits[i], "init", i);
     }
 
+    std::unordered_set<std::string> printed;
     out_ << "// ===== DATA FLOW (orthogonal edges) =====\n\t";
     for (size_t i = 0; i != nodes.size(); ++i) {
         if (!nodes[i])
             continue;
-
-        const std::string current_node_id = node_id(*nodes[i], i);
-
-        for (const std::string& raw_input_name : nodes[i]->get_inputs()) {
-            const std::string input_name = normalize_name(raw_input_name);
-            const auto prod_it = producer_by_tensor.find(input_name);
-            if (prod_it == producer_by_tensor.end())
-                continue;
-
-            const std::string edge_key =
-                prod_it->second + "->" + current_node_id + ":" + input_name;
-            if (!printed_edges.insert(edge_key).second)
-                continue;
-
-            out_ << prod_it->second << " -> " << current_node_id
-                 << " [xlabel=\"" << input_name
-                 << "\", minlen=" << edge_minlen_from_label(input_name)
-                 << "];\n\t";
-        }
-
-        for (const std::string& raw_output_name : nodes[i]->get_outputs()) {
-            const std::string output_name = normalize_name(raw_output_name);
-            producer_by_tensor[output_name] = current_node_id;
-        }
+        emit_node_edges(i, *nodes[i], producers, printed);
     }
-
-    for (size_t i = 0; i != outputs.size(); ++i) {
-        if (!outputs[i])
-            continue;
-
-        const std::string output_name = normalize_name(outputs[i]->get_name());
-        const auto prod_it = producer_by_tensor.find(output_name);
-        if (prod_it == producer_by_tensor.end())
-            continue;
-
-        const std::string output_id = tensor_id(*outputs[i], "output", i);
-        const std::string edge_key =
-            prod_it->second + "->" + output_id + ":" + output_name;
-        if (!printed_edges.insert(edge_key).second)
-            continue;
-
-        out_ << prod_it->second << " -> " << output_id << " [xlabel=\""
-             << output_name
-             << "\", minlen=" << edge_minlen_from_label(output_name) << "];\n";
-        if (i != outputs.size() - 1)
-            out_ << "\t";
-    }
+    emit_graph_output_edges(outputs, producers, printed);
 }
 
 void DumpGraph::print_graph(Graph& graph)
