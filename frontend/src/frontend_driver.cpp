@@ -386,6 +386,38 @@ int main(int argc, char** argv)
         return static_cast<int>(ExitCode::kVerifyFailed);
     }
 
+    std::optional<std::string> mlir_text_cache;
+    auto get_mlir_text = [&]() -> const std::string* {
+        if (mlir_text_cache) {
+            return &*mlir_text_cache;
+        }
+        std::string text;
+        if (!tc::frontend::mlir::EmitMlirModule(graph_ir, text, error)) {
+            PrintStageError("frontend",
+                            error.empty() ? "ERROR: failed to emit MLIR"
+                                          : error);
+            return nullptr;
+        }
+        mlir_text_cache = std::move(text);
+        return &*mlir_text_cache;
+    };
+
+    std::optional<std::string> metadata_cache;
+    auto get_metadata_json = [&]() -> const std::string* {
+        if (metadata_cache) {
+            return &*metadata_cache;
+        }
+        std::string json;
+        if (!tc::frontend::metadata::BuildMetadataJson(graph_ir, json, error)) {
+            PrintStageError("frontend",
+                            error.empty() ? "ERROR: failed to emit metadata"
+                                          : error);
+            return nullptr;
+        }
+        metadata_cache = std::move(json);
+        return &*metadata_cache;
+    };
+
     if (options.dump_path) {
         if (!EnsureParentDirExists(*options.dump_path)) {
             PrintStageError("frontend",
@@ -430,69 +462,22 @@ int main(int argc, char** argv)
     }
 
     if (options.mlir_path) {
-        if (!EnsureParentDirExists(*options.mlir_path)) {
-            PrintStageError("backend",
-                            "ERROR: failed to create mlir directory for " +
-                                *options.mlir_path);
+        const std::string* text = get_mlir_text();
+        if (text == nullptr) {
             return static_cast<int>(ExitCode::kError);
         }
-
-        std::string mlir_text;
-        if (!tc::frontend::mlir::EmitMlirModule(graph_ir, mlir_text, error)) {
-            PrintStageError("backend",
-                            error.empty() ? "ERROR: failed to emit MLIR"
-                                          : error);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        std::ofstream out(*options.mlir_path, std::ios::out | std::ios::trunc);
-        if (!out.is_open()) {
-            PrintStageError("backend",
-                            "ERROR: failed to open mlir file: " +
-                                *options.mlir_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        out << mlir_text;
-        if (!out.good()) {
-            PrintStageError("backend",
-                            "ERROR: failed to write mlir file: " +
-                                *options.mlir_path);
+        if (!WriteTextFile(*options.mlir_path, *text, "frontend")) {
             return static_cast<int>(ExitCode::kError);
         }
         std::cout << "MLIR written to: " << *options.mlir_path << '\n';
     }
 
     if (options.metadata_path) {
-        if (!EnsureParentDirExists(*options.metadata_path)) {
-            PrintStageError("frontend",
-                            "ERROR: failed to create metadata directory for " +
-                                *options.metadata_path);
+        const std::string* json = get_metadata_json();
+        if (json == nullptr) {
             return static_cast<int>(ExitCode::kError);
         }
-
-        std::string metadata_json;
-        if (!tc::frontend::metadata::BuildMetadataJson(
-                graph_ir, metadata_json, error)) {
-            PrintStageError("frontend",
-                            error.empty() ? "ERROR: failed to emit metadata"
-                                          : error);
-            return static_cast<int>(ExitCode::kError);
-        }
-
-        std::ofstream out(*options.metadata_path,
-                          std::ios::out | std::ios::trunc);
-        if (!out.is_open()) {
-            PrintStageError("frontend",
-                            "ERROR: failed to open metadata file: " +
-                                *options.metadata_path);
-            return static_cast<int>(ExitCode::kError);
-        }
-        out << metadata_json;
-        if (!out.good()) {
-            PrintStageError("frontend",
-                            "ERROR: failed to write metadata file: " +
-                                *options.metadata_path);
+        if (!WriteTextFile(*options.metadata_path, *json, "frontend")) {
             return static_cast<int>(ExitCode::kError);
         }
         std::cout << "Metadata written to: " << *options.metadata_path << '\n';
@@ -505,13 +490,11 @@ int main(int argc, char** argv)
                         "codegen support");
         return static_cast<int>(ExitCode::kError);
 #else
-        std::string mlir_text;
-        if (!tc::frontend::mlir::EmitMlirModule(graph_ir, mlir_text, error)) {
-            PrintStageError("backend",
-                            error.empty() ? "ERROR: failed to emit MLIR"
-                                          : error);
+        const std::string* mlir_text_ptr = get_mlir_text();
+        if (mlir_text_ptr == nullptr) {
             return static_cast<int>(ExitCode::kError);
         }
+        const std::string& mlir_text = *mlir_text_ptr;
 
         tc::backend::BackendDiagnostic backend_diagnostic;
         if (options.llvm_path) {
@@ -568,16 +551,12 @@ int main(int argc, char** argv)
         }
 
         if (options.exe_path) {
-            std::string metadata_json;
-            if (!tc::frontend::metadata::BuildMetadataJson(
-                    graph_ir, metadata_json, error)) {
-                PrintStageError("frontend",
-                                error.empty() ? "ERROR: failed to emit metadata"
-                                              : error);
+            const std::string* metadata_json = get_metadata_json();
+            if (metadata_json == nullptr) {
                 return static_cast<int>(ExitCode::kError);
             }
             if (!WriteTextFile(
-                    *options.metadata_path, metadata_json, "frontend")) {
+                    *options.metadata_path, *metadata_json, "frontend")) {
                 return static_cast<int>(ExitCode::kError);
             }
             std::cout << "Metadata written to: " << *options.metadata_path

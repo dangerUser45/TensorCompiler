@@ -47,7 +47,7 @@ bool ParseCustomArgs(int* argc, char** argv)
 
 } // namespace
 
-TEST(BackendStageDiagnostic, EmitMlirFailureReportsBackendStage)
+TEST(BackendStageDiagnostic, EmitMlirFailureReportsFrontendStage)
 {
     ASSERT_TRUE(std::filesystem::exists(g_config.driver_model_args.driver_path))
         << "driver not found: " << g_config.driver_model_args.driver_path;
@@ -66,9 +66,9 @@ TEST(BackendStageDiagnostic, EmitMlirFailureReportsBackendStage)
         command, "tc_backend_diag");
 
     EXPECT_NE(result.exit_code, 0) << "expected emit-mlir failure";
-    EXPECT_NE(tc::frontend::testutil::ToLower(result.output).find("backend"),
+    EXPECT_NE(tc::frontend::testutil::ToLower(result.output).find("frontend"),
               std::string::npos)
-        << "missing backend-stage diagnostic marker:\n"
+        << "missing frontend-stage diagnostic marker:\n"
         << result.output;
 }
 
