@@ -1134,28 +1134,19 @@ namespace tc::frontend::mlir {
 
 bool EmitMlirModule(const Graph& graph,
                     std::string& out_mlir_text,
-                    std::string& out_error)
-{
-    out_mlir_text.clear();
-    out_error.clear();
-
-    if (!CanEmitSimpleEntry(graph)) {
-        out_error = "ERROR: unsupported graph for production MLIR";
-        return false;
-    }
-
-    return EmitSimpleMain(graph, out_mlir_text, out_error);
-}
-
-bool EmitMlirModuleSkeleton(const Graph& graph,
-                            std::string& out_mlir_text,
-                            std::string& out_error)
+                    std::string& out_error,
+                    EmitMode mode)
 {
     out_mlir_text.clear();
     out_error.clear();
 
     if (CanEmitSimpleEntry(graph)) {
         return EmitSimpleMain(graph, out_mlir_text, out_error);
+    }
+
+    if (mode == EmitMode::kStrict) {
+        out_error = "ERROR: unsupported graph for production MLIR";
+        return false;
     }
 
     std::ostringstream out;

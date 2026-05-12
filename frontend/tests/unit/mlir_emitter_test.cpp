@@ -11,8 +11,8 @@
 
 #include "graph.hpp"
 #include "mlir_emitter.hpp"
-#include "onnx_importer.hpp"
 #include "onnx.pb.h"
+#include "onnx_importer.hpp"
 #include "op_kind.hpp"
 
 namespace {
@@ -389,8 +389,8 @@ TEST(MlirEmitter, EmitsDeterministicSkeletonForSingleNodeGraph)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
 
@@ -413,8 +413,8 @@ TEST(MlirEmitter, UsesFallbackGraphNameForUnnamedGraph)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
 
@@ -453,13 +453,12 @@ TEST(MlirEmitter, SingleReluModelRequiresLoweredMlirWithoutSkeletonTodo)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -482,13 +481,12 @@ TEST(MlirEmitter, ReluLoweringUsesZeroConstantInsteadOfIdentityMax)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/single_relu.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_NE(mlir_text.find("arith.constant dense<0.0> : tensor<1x2xf32>"),
@@ -507,13 +505,12 @@ TEST(MlirEmitter, TwoTransposesModelRequiresLoweredMlirWithoutSkeletonTodo)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/two_transposes.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -543,8 +540,8 @@ TEST(MlirEmitter, AddGraphEmitsTypedMainWithTwoArguments)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -568,13 +565,12 @@ TEST(MlirEmitter, AddModelRequiresArithmeticAddLowering)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/add.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_NE(mlir_text.find("arith.addf"), std::string::npos) << mlir_text;
@@ -634,8 +630,8 @@ TEST(MlirEmitter, MulGraphEmitsTypedMainWithMulf)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -665,8 +661,8 @@ TEST(MlirEmitter, MulOnnxModelRequiresArithmeticMulLowering)
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -692,8 +688,8 @@ TEST(MlirEmitter, MatMulGraphEmitsTypedMainWithTwoArguments)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -720,13 +716,12 @@ TEST(MlirEmitter, MatMulModelRequiresLinalgMatmulLowering)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/matmul_2d.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_NE(mlir_text.find("linalg.matmul"), std::string::npos) << mlir_text;
@@ -744,13 +739,12 @@ TEST(MlirEmitter, GemmBiasAddLowersWithExplicitBroadcastBeforeAdd)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/matmul_addmm.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     EXPECT_NE(mlir_text.find("linalg.broadcast ins(%arg2 : tensor<4xf32>)"),
@@ -768,8 +762,7 @@ TEST(MlirEmitter, ConvModelLowersToLinalgConvWithInitializerConstants)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -900,8 +893,7 @@ TEST(MlirEmitter, ConvWithZeroPadsOmitsPadsAttribute)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/conv_2d_nchw_fchw.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -920,8 +912,8 @@ TEST(MlirEmitter, MatMulLoweringUsesStableTemporaryOrdering)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
 
     const auto empty_pos = mlir_text.find("%t0 = tensor.empty()");
@@ -946,8 +938,8 @@ TEST(MlirEmitter, MaxPoolGraphEmitsLinalgPoolingNchw)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
@@ -1065,8 +1057,7 @@ TEST(MlirEmitter, MnistFullGraphEmitsSuccessfully)
 
     const std::string model_path =
         std::string(TC_TEST_MODELS_DIR) + "/mnist-8.onnx";
-    ASSERT_TRUE(
-        tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(model_path, graph, error))
         << "import failed: " << error;
 
     std::string mlir_text;
@@ -1113,8 +1104,8 @@ TEST(MlirEmitter, ReshapeGraphEmitsTensorReshape)
     std::string mlir_text;
     std::string error;
 
-    ASSERT_TRUE(
-        tc::frontend::mlir::EmitMlirModuleSkeleton(graph, mlir_text, error))
+    ASSERT_TRUE(tc::frontend::mlir::EmitMlirModule(
+        graph, mlir_text, error, tc::frontend::mlir::EmitMode::kLenient))
         << error;
     EXPECT_TRUE(error.empty());
     EXPECT_EQ(mlir_text.find("TODO(tc): Graph->MLIR lowering is not "
