@@ -63,6 +63,13 @@ enum LongOptionCode
     kPassPipeline
 };
 
+enum class ExitCode : int
+{
+    kOk = 0,
+    kError = 1,        // CLI / import / emission / IO error
+    kVerifyFailed = 2, // semantic verification reported errors
+};
+
 struct Options final
 {
     std::string input_path;
@@ -433,14 +440,14 @@ int main(int argc, char** argv)
         if (error.rfind("Usage:", 0) != 0) {
             std::cerr << BuildUsage(argv[0]) << '\n';
         }
-        return 1;
+        return static_cast<int>(ExitCode::kError);
     }
 
     tc::frontend::Graph graph_ir;
     if (!tc::frontend::onnx::ImportOnnxToGraph(
             options.input_path, graph_ir, error)) {
         PrintStageError("import", error);
-        return 1;
+        return static_cast<int>(ExitCode::kError);
     }
 
     bool verified = true;
@@ -458,7 +465,7 @@ int main(int argc, char** argv)
     }
 
     if (backend_output_requested && !verified) {
-        return 2;
+        return static_cast<int>(ExitCode::kVerifyFailed);
     }
 
     if (options.dump_requested) {
@@ -466,7 +473,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to create dump directory for " +
                                 options.dump_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::ofstream out(options.dump_path, std::ios::out | std::ios::trunc);
@@ -474,7 +481,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to open dump file: " +
                                 options.dump_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
         tc::frontend::DumpGraph dumper(out);
         dumper.dump(graph_ir);
@@ -486,7 +493,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to create hash directory for " +
                                 options.hash_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::ofstream out(options.hash_path, std::ios::out | std::ios::trunc);
@@ -494,7 +501,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to open hash file: " +
                                 options.hash_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         const std::size_t graph_hash = tc::frontend::HashGraph(graph_ir);
@@ -509,7 +516,7 @@ int main(int argc, char** argv)
             PrintStageError("backend",
                             "ERROR: failed to create mlir directory for " +
                                 options.mlir_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::string mlir_text;
@@ -517,7 +524,7 @@ int main(int argc, char** argv)
             PrintStageError("backend",
                             error.empty() ? "ERROR: failed to emit MLIR"
                                           : error);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::ofstream out(options.mlir_path, std::ios::out | std::ios::trunc);
@@ -525,7 +532,7 @@ int main(int argc, char** argv)
             PrintStageError("backend",
                             "ERROR: failed to open mlir file: " +
                                 options.mlir_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         out << mlir_text;
@@ -533,7 +540,7 @@ int main(int argc, char** argv)
             PrintStageError("backend",
                             "ERROR: failed to write mlir file: " +
                                 options.mlir_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
         std::cout << "MLIR written to: " << options.mlir_path << '\n';
     }
@@ -543,7 +550,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to create metadata directory for " +
                                 options.metadata_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::string metadata_json;
@@ -552,7 +559,7 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             error.empty() ? "ERROR: failed to emit metadata"
                                           : error);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         std::ofstream out(options.metadata_path,
@@ -561,14 +568,14 @@ int main(int argc, char** argv)
             PrintStageError("frontend",
                             "ERROR: failed to open metadata file: " +
                                 options.metadata_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
         out << metadata_json;
         if (!out.good()) {
             PrintStageError("frontend",
                             "ERROR: failed to write metadata file: " +
                                 options.metadata_path);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
         std::cout << "Metadata written to: " << options.metadata_path << '\n';
     }
@@ -578,14 +585,14 @@ int main(int argc, char** argv)
         PrintStageError("backend",
                         "ERROR: frontend_driver was built without backend "
                         "codegen support");
-        return 1;
+        return static_cast<int>(ExitCode::kError);
 #else
         std::string mlir_text;
         if (!tc::frontend::mlir::EmitMlirModule(graph_ir, mlir_text, error)) {
             PrintStageError("backend",
                             error.empty() ? "ERROR: failed to emit MLIR"
                                           : error);
-            return 1;
+            return static_cast<int>(ExitCode::kError);
         }
 
         tc::backend::BackendDiagnostic backend_diagnostic;
@@ -600,10 +607,10 @@ int main(int argc, char** argv)
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             if (!WriteTextFile(options.llvm_path, llvm_ir, "backend")) {
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             std::cout << "LLVM IR written to: " << options.llvm_path << '\n';
         }
@@ -619,10 +626,10 @@ int main(int argc, char** argv)
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             if (!WriteTextFile(options.asm_path, asm_text, "backend")) {
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             std::cout << "ASM written to: " << options.asm_path << '\n';
         }
@@ -637,7 +644,7 @@ int main(int argc, char** argv)
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             std::cout << "Object written to: " << options.object_path << '\n';
         }
@@ -649,11 +656,11 @@ int main(int argc, char** argv)
                 PrintStageError("frontend",
                                 error.empty() ? "ERROR: failed to emit metadata"
                                               : error);
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             if (!WriteTextFile(
                     options.metadata_path, metadata_json, "frontend")) {
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             std::cout << "Metadata written to: " << options.metadata_path
                       << '\n';
@@ -665,7 +672,7 @@ int main(int argc, char** argv)
                 PrintStageError(
                     "backend",
                     tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return 1;
+                return static_cast<int>(ExitCode::kError);
             }
             std::cout << "Executable written to: " << options.exe_path << '\n';
         }
@@ -673,8 +680,8 @@ int main(int argc, char** argv)
     }
 
     if ((options.verify || options.verify_exec) && !verified) {
-        return 2;
+        return static_cast<int>(ExitCode::kVerifyFailed);
     }
 
-    return 0;
+    return static_cast<int>(ExitCode::kOk);
 }
