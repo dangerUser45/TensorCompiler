@@ -15,12 +15,7 @@
 #include "model_metadata.hpp"
 #include "onnx_importer.hpp"
 
-#if TC_FRONTEND_HAS_BACKEND
-#include "codegen_driver.hpp"
-#include "executable_linker.hpp"
-#include "object_emitter.hpp"
-#endif
-
+#include "backend_runner.hpp"
 #include "driver_defaults.hpp"
 
 namespace {
@@ -515,96 +510,35 @@ int main(int argc, char** argv)
     }
 
     if (backend_output_requested) {
-#if !TC_FRONTEND_HAS_BACKEND
-        PrintStageError("backend",
-                        "ERROR: frontend_driver was built without backend "
-                        "codegen support");
-        return static_cast<int>(ExitCode::kError);
-#else
         const std::string* mlir_text_ptr = get_mlir_text();
         if (mlir_text_ptr == nullptr) {
             return static_cast<int>(ExitCode::kError);
         }
-        const std::string& mlir_text = *mlir_text_ptr;
 
-        tc::backend::BackendDiagnostic backend_diagnostic;
-        if (options.llvm_path) {
-            std::string llvm_ir;
-            if (!tc::backend::EmitLlvmIrFromMlirText(mlir_text,
-                                                     options.input_path,
-                                                     options.pass_pipeline,
-                                                     options.target_triple,
-                                                     llvm_ir,
-                                                     backend_diagnostic)) {
-                PrintStageError(
-                    "backend",
-                    tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return static_cast<int>(ExitCode::kError);
-            }
-            if (!WriteTextFile(*options.llvm_path, llvm_ir, "backend")) {
-                return static_cast<int>(ExitCode::kError);
-            }
-            std::cout << "LLVM IR written to: " << *options.llvm_path << '\n';
-        }
-
-        if (options.asm_path) {
-            std::string asm_text;
-            if (!tc::backend::EmitAsmFromMlirText(mlir_text,
-                                                  options.input_path,
-                                                  options.pass_pipeline,
-                                                  options.target_triple,
-                                                  asm_text,
-                                                  backend_diagnostic)) {
-                PrintStageError(
-                    "backend",
-                    tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return static_cast<int>(ExitCode::kError);
-            }
-            if (!WriteTextFile(*options.asm_path, asm_text, "backend")) {
-                return static_cast<int>(ExitCode::kError);
-            }
-            std::cout << "ASM written to: " << *options.asm_path << '\n';
-        }
-
-        if (options.object_path) {
-            if (!tc::backend::EmitObjectFromMlirText(mlir_text,
-                                                     options.input_path,
-                                                     options.pass_pipeline,
-                                                     options.target_triple,
-                                                     *options.object_path,
-                                                     backend_diagnostic)) {
-                PrintStageError(
-                    "backend",
-                    tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return static_cast<int>(ExitCode::kError);
-            }
-            std::cout << "Object written to: " << *options.object_path << '\n';
-        }
-
+        std::string metadata_path_str;
+        std::string metadata_json_str;
         if (options.exe_path) {
-            const std::string* metadata_json = get_metadata_json();
-            if (metadata_json == nullptr) {
+            const std::string* json = get_metadata_json();
+            if (json == nullptr) {
                 return static_cast<int>(ExitCode::kError);
             }
-            if (!WriteTextFile(
-                    *options.metadata_path, *metadata_json, "frontend")) {
-                return static_cast<int>(ExitCode::kError);
-            }
-            std::cout << "Metadata written to: " << *options.metadata_path
-                      << '\n';
-
-            if (!tc::backend::LinkExecutableWithRuntime(*options.object_path,
-                                                        *options.metadata_path,
-                                                        *options.exe_path,
-                                                        backend_diagnostic)) {
-                PrintStageError(
-                    "backend",
-                    tc::backend::FormatBackendDiagnostic(backend_diagnostic));
-                return static_cast<int>(ExitCode::kError);
-            }
-            std::cout << "Executable written to: " << *options.exe_path << '\n';
+            metadata_path_str = *options.metadata_path;
+            metadata_json_str = *json;
         }
-#endif
+
+        const tc::frontend::driver::BackendRequest request{
+            options.llvm_path, options.asm_path,      options.object_path,
+            options.exe_path,  options.target_triple, options.pass_pipeline,
+        };
+        const int rc =
+            tc::frontend::driver::RunBackendPipeline(request,
+                                                     *mlir_text_ptr,
+                                                     options.input_path,
+                                                     metadata_json_str,
+                                                     metadata_path_str);
+        if (rc != 0) {
+            return rc;
+        }
     }
 
     if ((options.verify || options.verify_exec) && !verified) {
