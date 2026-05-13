@@ -80,14 +80,85 @@ std::string BuildPathByModelName(const std::string& input_path,
         .string();
 }
 
-bool ParseArgs(int argc,
-               char** argv,
-               Options& out_options,
-               std::string& out_error)
+void FillDefaultPaths(Options& options)
 {
-    out_options = Options{};
-    out_error.clear();
+    struct PathDefault
+    {
+        std::optional<std::string>& slot;
+        std::string_view dir;
+        std::string_view ext;
+    };
+    const std::array<PathDefault, 8> defaults{ {
+        { options.dump_path, kDefaultDumpDir, ".dot" },
+        { options.hash_path, kDefaultHashDir, ".hash" },
+        { options.mlir_path, kDefaultMlirDir, ".mlir" },
+        { options.metadata_path, kDefaultMetadataDir, ".json" },
+        { options.llvm_path, kDefaultLlvmDir, ".ll" },
+        { options.asm_path, kDefaultAsmDir, ".s" },
+        { options.object_path, kDefaultObjectDir, ".o" },
+        { options.exe_path, kDefaultExeDir, "" },
+    } };
+    for (const auto& d : defaults) {
+        if (d.slot.has_value() && d.slot->empty()) {
+            *d.slot = BuildPathByModelName(options.input_path, d.dir, d.ext);
+        }
+    }
+    if (options.exe_path.has_value() && !options.object_path.has_value()) {
+        options.object_path =
+            BuildPathByModelName(options.input_path, kDefaultObjectDir, ".o");
+    }
+    if (options.exe_path.has_value() && !options.metadata_path.has_value()) {
+        options.metadata_path = BuildPathByModelName(
+            options.input_path, kDefaultMetadataDir, ".json");
+    }
+}
 
+bool ResolvePositionalPath(Options& options,
+                           int argc,
+                           char** argv,
+                           int& optind_io,
+                           std::string& out_error)
+{
+    if (optind_io >= argc || (argc - optind_io) != 1) {
+        return true;
+    }
+    std::optional<std::string>* unresolved_slot = nullptr;
+    std::size_t unresolved_count = 0;
+    auto mark = [&](std::optional<std::string>& slot) {
+        if (slot.has_value() && slot->empty()) {
+            unresolved_slot = &slot;
+            ++unresolved_count;
+        }
+    };
+    mark(options.dump_path);
+    mark(options.hash_path);
+    mark(options.mlir_path);
+    mark(options.metadata_path);
+    mark(options.llvm_path);
+    mark(options.asm_path);
+    mark(options.object_path);
+    mark(options.exe_path);
+
+    if (unresolved_count == 1) {
+        *unresolved_slot = argv[optind_io];
+        ++optind_io;
+        return true;
+    }
+    if (unresolved_count > 1) {
+        out_error = "ERROR: ambiguous output path; use explicit "
+                    "--dump=, --hash=, --emit-mlir=, --emit-metadata=, "
+                    "--emit-llvm=, --emit-asm=, --emit-object= or --emit-exe=";
+        return false;
+    }
+    return true;
+}
+
+bool ParseRawFlags(int argc,
+                   char** argv,
+                   Options& out_options,
+                   std::string& out_error,
+                   int& optind_out)
+{
     static const option kLongOptions[] = {
         { "verify", no_argument, nullptr, 'v' },
         { "verify-exec", no_argument, nullptr, 'x' },
@@ -193,80 +264,33 @@ bool ParseArgs(int argc,
         out_error = "ERROR: model path is required";
         return false;
     }
-
     out_options.input_path = argv[optind];
     ++optind;
+    optind_out = optind;
+    return true;
+}
 
-    if (optind < argc && (argc - optind) == 1) {
-        std::optional<std::string>* unresolved_slot = nullptr;
-        std::size_t unresolved_count = 0;
-        auto mark = [&](std::optional<std::string>& slot) {
-            if (slot.has_value() && slot->empty()) {
-                unresolved_slot = &slot;
-                ++unresolved_count;
-            }
-        };
-        mark(out_options.dump_path);
-        mark(out_options.hash_path);
-        mark(out_options.mlir_path);
-        mark(out_options.metadata_path);
-        mark(out_options.llvm_path);
-        mark(out_options.asm_path);
-        mark(out_options.object_path);
-        mark(out_options.exe_path);
+bool ParseArgs(int argc,
+               char** argv,
+               Options& out_options,
+               std::string& out_error)
+{
+    out_options = Options{};
+    out_error.clear();
 
-        if (unresolved_count == 1) {
-            *unresolved_slot = argv[optind];
-            ++optind;
-        } else if (unresolved_count > 1) {
-            out_error =
-                "ERROR: ambiguous output path; use explicit "
-                "--dump=, --hash=, --emit-mlir=, --emit-metadata=, "
-                "--emit-llvm=, --emit-asm=, --emit-object= or --emit-exe=";
-            return false;
-        }
+    int optind_after = 0;
+    if (!ParseRawFlags(argc, argv, out_options, out_error, optind_after)) {
+        return false;
     }
-
-    if (optind < argc) {
+    if (!ResolvePositionalPath(
+            out_options, argc, argv, optind_after, out_error)) {
+        return false;
+    }
+    if (optind_after < argc) {
         out_error = "ERROR: multiple input files are not supported";
         return false;
     }
-
-    struct PathDefault
-    {
-        std::optional<std::string>& slot;
-        std::string_view dir;
-        std::string_view ext;
-    };
-    const std::array<PathDefault, 8> path_defaults{ {
-        { out_options.dump_path, kDefaultDumpDir, ".dot" },
-        { out_options.hash_path, kDefaultHashDir, ".hash" },
-        { out_options.mlir_path, kDefaultMlirDir, ".mlir" },
-        { out_options.metadata_path, kDefaultMetadataDir, ".json" },
-        { out_options.llvm_path, kDefaultLlvmDir, ".ll" },
-        { out_options.asm_path, kDefaultAsmDir, ".s" },
-        { out_options.object_path, kDefaultObjectDir, ".o" },
-        { out_options.exe_path, kDefaultExeDir, "" },
-    } };
-    for (const auto& d : path_defaults) {
-        if (d.slot.has_value() && d.slot->empty()) {
-            *d.slot =
-                BuildPathByModelName(out_options.input_path, d.dir, d.ext);
-        }
-    }
-
-    // --emit-exe implies object and metadata defaults if not already requested.
-    if (out_options.exe_path.has_value() &&
-        !out_options.object_path.has_value()) {
-        out_options.object_path = BuildPathByModelName(
-            out_options.input_path, kDefaultObjectDir, ".o");
-    }
-    if (out_options.exe_path.has_value() &&
-        !out_options.metadata_path.has_value()) {
-        out_options.metadata_path = BuildPathByModelName(
-            out_options.input_path, kDefaultMetadataDir, ".json");
-    }
-
+    FillDefaultPaths(out_options);
     return true;
 }
 
