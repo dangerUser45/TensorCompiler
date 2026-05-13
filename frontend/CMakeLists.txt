@@ -49,6 +49,7 @@ add_library(tc_frontend_onnx STATIC
     src/graph_verifier.cpp
     src/mlir_emitter.cpp
     src/model_metadata.cpp
+    src/dump_graph.cpp
     ${PROTO_SRCS}
 )
 

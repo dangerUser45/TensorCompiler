@@ -1,3 +1,4 @@
+#include "onnx.pb.h"
 #include "onnx_importer.hpp"
 
 #include <atomic>
@@ -179,12 +180,11 @@ TEST(ImporterAttrNormalization, ReluUnexpectedAttributeFails)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("does not support attribute"), std::string::npos)
         << error;
 }
@@ -202,12 +202,11 @@ TEST(ImporterAttrNormalization, MulUnexpectedAttributeFails)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("does not support attribute"), std::string::npos)
         << error;
 }
@@ -225,12 +224,11 @@ TEST(ImporterAttrNormalization, TransposeUnknownAttributeFails)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("unsupported attribute"), std::string::npos) << error;
 }
 
@@ -247,12 +245,11 @@ TEST(ImporterAttrNormalization, TransposePermIsImportedAsInt64Vector)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -270,12 +267,11 @@ TEST(ImporterAttrNormalization, ConvImportsDefaultAttributes)
 {
     const TempModelFile temp_model(BuildConvModel([](::onnx::NodeProto&) {}));
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -322,12 +318,11 @@ TEST(ImporterAttrNormalization, ConvPreservesExplicitAttributes)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -351,12 +346,11 @@ TEST(ImporterAttrNormalization, ConvUnsupportedAutoPadFails)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
 }
 
@@ -370,12 +364,11 @@ TEST(ImporterAttrNormalization, ConvAutoPadValidRejected)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
 }
 
@@ -411,12 +404,11 @@ TEST(ImporterAttrNormalization, ConvAutoPadSameUpperNormalizesToExplicitPads)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -459,12 +451,11 @@ TEST(ImporterAttrNormalization, ConvAutoPadSameUpperWithExplicitPadsRejected)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
 }
 
@@ -473,12 +464,11 @@ TEST(ImporterAttrNormalization, MaxPoolImportsDefaultAttributes)
     const TempModelFile temp_model(
         BuildMaxPoolModel([](::onnx::NodeProto&) {}));
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -519,12 +509,11 @@ TEST(ImporterAttrNormalization, MaxPoolPreservesExplicitStridesAndPads)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 1u);
@@ -560,12 +549,11 @@ TEST(ImporterAttrNormalization, MaxPoolMissingKernelShapeFails)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph imported_graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, imported_graph, error));
+        temp_model.path().string(), imported_graph, error));
     EXPECT_NE(error.find("kernel_shape"), std::string::npos) << error;
 }
 
@@ -579,12 +567,11 @@ TEST(ImporterAttrNormalization, MaxPoolUnsupportedAutoPadFails)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("auto_pad"), std::string::npos) << error;
 }
 
@@ -598,12 +585,11 @@ TEST(ImporterAttrNormalization, MaxPoolCeilModeRejected)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("ceil_mode"), std::string::npos) << error;
 }
 
@@ -618,12 +604,11 @@ TEST(ImporterAttrNormalization, MaxPoolNonDefaultDilationsRejected)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("dilations"), std::string::npos) << error;
 }
 
@@ -637,12 +622,11 @@ TEST(ImporterAttrNormalization, MaxPoolUnknownAttributeRejected)
     });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error));
+        temp_model.path().string(), graph, error));
     EXPECT_NE(error.find("storage_order"), std::string::npos) << error;
 }
 
@@ -676,12 +660,11 @@ TEST(ImporterAttrNormalization, MaxPoolIndicesOutputRejected)
 
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph imported_graph;
     std::string error;
 
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, imported_graph, error));
+        temp_model.path().string(), imported_graph, error));
     EXPECT_NE(error.find("expects 1 output"), std::string::npos) << error;
 }
 
@@ -691,12 +674,11 @@ TEST(ImporterAttrNormalization, ConvWithBiasNormalizesToConvAdd)
         BuildConvModel([](::onnx::NodeProto& node) { node.add_input("bias"); });
     const TempModelFile temp_model(model);
 
-    ::onnx::ModelProto loaded_model;
     tc::frontend::Graph graph;
     std::string error;
 
     ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
-        temp_model.path().string(), loaded_model, graph, error))
+        temp_model.path().string(), graph, error))
         << error;
 
     ASSERT_EQ(graph.get_nodes().size(), 2u);

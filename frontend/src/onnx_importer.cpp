@@ -18,13 +18,10 @@ bool SetError(std::string& out_error, std::string msg)
     out_error = std::move(msg);
     return false;
 }
-} // namespace
 
-namespace tc::frontend {
-
-bool onnx::LoadOnnxModel(const std::string& path,
-                         ::onnx::ModelProto& out_model,
-                         std::string& out_error)
+bool LoadOnnxModel(const std::string& path,
+                   ::onnx::ModelProto& out_model,
+                   std::string& out_error)
 {
     out_model.Clear();
     out_error.clear();
@@ -47,6 +44,9 @@ bool onnx::LoadOnnxModel(const std::string& path,
 
     return true;
 }
+} // namespace
+
+namespace tc::frontend {
 
 namespace detail {
 
@@ -1408,11 +1408,11 @@ bool BuildGraph(const ::onnx::GraphProto& g,
 } // namespace detail
 
 bool onnx::ImportOnnxToGraph(const std::string& path,
-                             ::onnx::ModelProto& input_model,
                              Graph& out_graph,
                              std::string& out_error)
 {
-    if (!onnx::LoadOnnxModel(path, input_model, out_error)) {
+    ::onnx::ModelProto input_model;
+    if (!LoadOnnxModel(path, input_model, out_error)) {
         return false;
     }
 
