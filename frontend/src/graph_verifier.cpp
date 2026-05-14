@@ -1,8 +1,9 @@
 #include "graph_verifier.hpp"
+#include "graph_utils.hpp"
+#include "shape_inference.hpp"
 
 #include <algorithm>
 #include <cstddef>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -10,45 +11,12 @@
 
 namespace {
 
-bool IsMvpNumericDataId(tc::frontend::DataID id) noexcept
-{
-    switch (id) {
-        case tc::frontend::DataID::INT8:
-        case tc::frontend::DataID::INT16:
-        case tc::frontend::DataID::INT32:
-        case tc::frontend::DataID::INT64:
-        case tc::frontend::DataID::UNSIGNED_INT8:
-        case tc::frontend::DataID::UNSIGNED_INT16:
-        case tc::frontend::DataID::UNSIGNED_INT32:
-        case tc::frontend::DataID::UNSIGNED_INT64:
-        case tc::frontend::DataID::FLOAT:
-        case tc::frontend::DataID::DOUBLE:
-            return true;
-        case tc::frontend::DataID::COMPLEX64:
-        case tc::frontend::DataID::COMPLEX128:
-        case tc::frontend::DataID::STRING:
-        case tc::frontend::DataID::UNDEFINED:
-            return false;
-    }
-    return false;
-}
-
 std::string DtypeName(const tc::frontend::DataT& type)
 {
     if (!type.data_type_str.empty()) {
         return type.data_type_str;
     }
     return "UNDEFINED";
-}
-
-std::string BuildNodeContext(const tc::frontend::Node& node,
-                             std::size_t node_index)
-{
-    if (!node.get_name_node().empty()) {
-        return "node[" + std::to_string(node_index) + "]('" +
-               node.get_name_node() + "')";
-    }
-    return "node[" + std::to_string(node_index) + "]";
 }
 
 bool ShapesMatchForMvp(const std::vector<int64_t>& lhs,
@@ -69,193 +37,6 @@ bool ShapesMatchForMvp(const std::vector<int64_t>& lhs,
     return true;
 }
 
-bool BroadcastDimsCompatible(int64_t lhs_dim, int64_t rhs_dim) noexcept
-{
-    if (lhs_dim == rhs_dim || lhs_dim == 1 || rhs_dim == 1) {
-        return true;
-    }
-    if (lhs_dim == -1 || rhs_dim == -1) {
-        return true;
-    }
-    return false;
-}
-
-int64_t ResolveBroadcastDim(int64_t lhs_dim, int64_t rhs_dim) noexcept
-{
-    if (lhs_dim == rhs_dim) {
-        return lhs_dim;
-    }
-    if (lhs_dim == 1) {
-        return rhs_dim == -1 ? -1 : rhs_dim;
-    }
-    if (rhs_dim == 1) {
-        return lhs_dim == -1 ? -1 : lhs_dim;
-    }
-    if (lhs_dim == -1 && rhs_dim == -1) {
-        return -1;
-    }
-    if (lhs_dim == -1) {
-        return rhs_dim;
-    }
-    if (rhs_dim == -1) {
-        return lhs_dim;
-    }
-    return -1;
-}
-
-bool ComputeBroadcastShape(const std::vector<int64_t>& lhs_shape,
-                           const std::vector<int64_t>& rhs_shape,
-                           std::vector<int64_t>& out_shape)
-{
-    const std::size_t rank = std::max(lhs_shape.size(), rhs_shape.size());
-    out_shape.assign(rank, -1);
-
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        const std::size_t lhs_offset = rank - lhs_shape.size();
-        const std::size_t rhs_offset = rank - rhs_shape.size();
-        const int64_t lhs_dim =
-            axis < lhs_offset ? 1 : lhs_shape[axis - lhs_offset];
-        const int64_t rhs_dim =
-            axis < rhs_offset ? 1 : rhs_shape[axis - rhs_offset];
-
-        if (!BroadcastDimsCompatible(lhs_dim, rhs_dim)) {
-            return false;
-        }
-        out_shape[axis] = ResolveBroadcastDim(lhs_dim, rhs_dim);
-    }
-
-    return true;
-}
-
-bool EndsWith(std::string_view text, std::string_view suffix) noexcept
-{
-    return text.size() >= suffix.size() &&
-           text.compare(text.size() - suffix.size(), suffix.size(), suffix) ==
-               0;
-}
-
-bool IsSyntheticBiasAdd(const tc::frontend::Node& node) noexcept
-{
-    return node.get_op_kind() == tc::frontend::OpKind::kAdd &&
-           EndsWith(node.get_name_node(), ".add");
-}
-
-bool ComputeChannelBiasBroadcastShape(const std::vector<int64_t>& lhs_shape,
-                                      const std::vector<int64_t>& rhs_shape,
-                                      std::vector<int64_t>& out_shape)
-{
-    if (lhs_shape.size() == 4 && rhs_shape.size() == 1 &&
-        BroadcastDimsCompatible(lhs_shape[1], rhs_shape[0])) {
-        out_shape = lhs_shape;
-        return true;
-    }
-    if (lhs_shape.size() == 1 && rhs_shape.size() == 4 &&
-        BroadcastDimsCompatible(lhs_shape[0], rhs_shape[1])) {
-        out_shape = rhs_shape;
-        return true;
-    }
-    return false;
-}
-
-bool HasOnlyStaticDims(const std::vector<int64_t>& shape) noexcept
-{
-    return std::all_of(
-        shape.begin(), shape.end(), [](int64_t dim) { return dim >= 0; });
-}
-
-int64_t StaticElementCount(const std::vector<int64_t>& shape) noexcept
-{
-    int64_t count = 1;
-    for (const int64_t dim : shape) {
-        count *= dim;
-    }
-    return count;
-}
-
-bool InferReshapeOutputShape(const std::vector<int64_t>& input_shape,
-                             const std::vector<int64_t>& target_shape_spec,
-                             std::vector<int64_t>& out_shape,
-                             std::string& out_error)
-{
-    out_shape.clear();
-    out_error.clear();
-    if (target_shape_spec.empty()) {
-        out_error = "target shape is empty";
-        return false;
-    }
-
-    std::optional<std::size_t> infer_axis;
-    out_shape = target_shape_spec;
-    for (std::size_t i = 0; i < out_shape.size(); ++i) {
-        const int64_t dim = out_shape[i];
-        if (dim == -1) {
-            if (infer_axis.has_value()) {
-                out_error = "target shape contains multiple -1 dimensions";
-                return false;
-            }
-            infer_axis = i;
-            continue;
-        }
-        if (dim == 0) {
-            if (i >= input_shape.size()) {
-                out_error = "target shape contains axis copy out of range";
-                return false;
-            }
-            out_shape[i] = input_shape[i];
-            continue;
-        }
-        if (dim < -1) {
-            out_error = "target shape contains invalid negative dimension";
-            return false;
-        }
-    }
-
-    const bool input_static = HasOnlyStaticDims(input_shape);
-    const int64_t input_count =
-        input_static ? StaticElementCount(input_shape) : -1;
-
-    bool known_target_static = true;
-    int64_t known_target_count = 1;
-    for (std::size_t i = 0; i < out_shape.size(); ++i) {
-        if (infer_axis.has_value() && *infer_axis == i) {
-            continue;
-        }
-        if (out_shape[i] < 0) {
-            known_target_static = false;
-            break;
-        }
-        known_target_count *= out_shape[i];
-    }
-
-    if (infer_axis.has_value()) {
-        if (!input_static || !known_target_static || known_target_count == 0 ||
-            input_count % known_target_count != 0) {
-            out_error = "cannot infer -1 dimension from input and target shape";
-            return false;
-        }
-        out_shape[*infer_axis] = input_count / known_target_count;
-        return true;
-    }
-
-    if (input_static && known_target_static &&
-        input_count != known_target_count) {
-        out_error = "input and target shapes have different element counts";
-        return false;
-    }
-    return true;
-}
-
-const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
-                                        std::string_view name)
-{
-    for (const auto& attr : node.get_attrs()) {
-        if (attr && attr->get_name() == name) {
-            return attr.get();
-        }
-    }
-    return nullptr;
-}
-
 bool ReadRequiredIntAttr(const tc::frontend::Node& node,
                          const std::string& node_context,
                          std::string_view attr_name,
@@ -264,7 +45,7 @@ bool ReadRequiredIntAttr(const tc::frontend::Node& node,
                          std::vector<int64_t>& out_values)
 {
     out_values.clear();
-    const auto* attr = FindAttr(node, attr_name);
+    const auto* attr = tc::frontend::FindAttr(node, attr_name);
     if (attr == nullptr) {
         report.add_error("ERROR: " + node_context + " op 'Conv' missing " +
                          std::string(attr_name));
@@ -294,7 +75,7 @@ bool ReadMaxPoolIntAttr(const tc::frontend::Node& node,
                         std::vector<int64_t>& out_values)
 {
     out_values.clear();
-    const auto* attr = FindAttr(node, attr_name);
+    const auto* attr = tc::frontend::FindAttr(node, attr_name);
     if (attr == nullptr) {
         if (required) {
             report.add_error("ERROR: " + node_context +
@@ -528,7 +309,7 @@ private:
                     return;
                 }
 
-                if (!IsMvpNumericDataId(input_dtype.id)) {
+                if (!tc::frontend::IsSupportedNumericDtype(input_dtype.id)) {
                     report_.add_error("ERROR: " + node_context + " op '" +
                                       std::string(tc::frontend::ToString(
                                           node.get_op_kind())) +
@@ -559,7 +340,7 @@ private:
                     return;
                 }
 
-                if (!IsMvpNumericDataId(lhs_dtype.id)) {
+                if (!tc::frontend::IsSupportedNumericDtype(lhs_dtype.id)) {
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +
                         std::string(
@@ -569,7 +350,7 @@ private:
                     return;
                 }
 
-                if (!IsMvpNumericDataId(rhs_dtype.id)) {
+                if (!tc::frontend::IsSupportedNumericDtype(rhs_dtype.id)) {
                     report_.add_error(
                         "ERROR: " + node_context + " op '" +
                         std::string(
@@ -609,7 +390,7 @@ private:
                     return;
                 }
 
-                if (!IsMvpNumericDataId(data_dtype.id)) {
+                if (!tc::frontend::IsSupportedNumericDtype(data_dtype.id)) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Reshape' expects numeric dtype "
                                       "for input[0], got " +
@@ -833,10 +614,10 @@ private:
                 }
 
                 std::vector<int64_t> inferred_shape;
-                if (!ComputeBroadcastShape(
+                if (!tc::frontend::ComputeBroadcastShape(
                         lhs_shape, rhs_shape, inferred_shape) &&
-                    (!IsSyntheticBiasAdd(node) ||
-                     !ComputeChannelBiasBroadcastShape(
+                    (!tc::frontend::IsSyntheticBiasAdd(node) ||
+                     !tc::frontend::ComputeChannelBiasBroadcastShape(
                          lhs_shape, rhs_shape, inferred_shape))) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Add' input shapes mismatch");
@@ -865,7 +646,7 @@ private:
                 }
 
                 std::vector<int64_t> inferred_shape;
-                if (!ComputeBroadcastShape(
+                if (!tc::frontend::ComputeBroadcastShape(
                         lhs_shape, rhs_shape, inferred_shape)) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Mul' input shapes mismatch");
@@ -941,10 +722,10 @@ private:
 
                 std::vector<int64_t> inferred_shape;
                 std::string reshape_error;
-                if (!InferReshapeOutputShape(input_shape,
-                                             shape_it->second,
-                                             inferred_shape,
-                                             reshape_error)) {
+                if (!tc::frontend::InferReshapeOutputShape(input_shape,
+                                                           shape_it->second,
+                                                           inferred_shape,
+                                                           reshape_error)) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Reshape' " + reshape_error);
                     return;
@@ -970,13 +751,7 @@ private:
                     return;
                 }
 
-                const tc::frontend::Attribute* perm_attr = nullptr;
-                for (const auto& attr : node.get_attrs()) {
-                    if (attr && attr->get_name() == "perm") {
-                        perm_attr = attr.get();
-                        break;
-                    }
-                }
+                const auto* perm_attr = tc::frontend::FindAttr(node, "perm");
                 if (!perm_attr || perm_attr->get_data_type().id !=
                                       tc::frontend::DataID::INT64) {
                     return;
@@ -1098,15 +873,19 @@ private:
                 }
 
                 const int64_t out_h =
-                    (input_shape[2] + pads[0] + pads[2] -
-                     dilations[0] * (kernel_shape[0] - 1) - 1) /
-                        strides[0] +
-                    1;
+                    tc::frontend::ComputeSpatialOutputSize(input_shape[2],
+                                                           kernel_shape[0],
+                                                           strides[0],
+                                                           pads[0],
+                                                           pads[2],
+                                                           dilations[0]);
                 const int64_t out_w =
-                    (input_shape[3] + pads[1] + pads[3] -
-                     dilations[1] * (kernel_shape[1] - 1) - 1) /
-                        strides[1] +
-                    1;
+                    tc::frontend::ComputeSpatialOutputSize(input_shape[3],
+                                                           kernel_shape[1],
+                                                           strides[1],
+                                                           pads[1],
+                                                           pads[3],
+                                                           dilations[1]);
                 if (out_h <= 0 || out_w <= 0) {
                     report_.add_error("ERROR: " + node_context +
                                       " op 'Conv' non-positive output shape");
@@ -1199,14 +978,20 @@ private:
                     return;
                 }
 
-                const int64_t out_h = (input_shape[2] + pads[0] + pads[2] -
-                                       (kernel_shape[0] - 1) - 1) /
-                                          strides[0] +
-                                      1;
-                const int64_t out_w = (input_shape[3] + pads[1] + pads[3] -
-                                       (kernel_shape[1] - 1) - 1) /
-                                          strides[1] +
-                                      1;
+                const int64_t out_h =
+                    tc::frontend::ComputeSpatialOutputSize(input_shape[2],
+                                                           kernel_shape[0],
+                                                           strides[0],
+                                                           pads[0],
+                                                           pads[2],
+                                                           1);
+                const int64_t out_w =
+                    tc::frontend::ComputeSpatialOutputSize(input_shape[3],
+                                                           kernel_shape[1],
+                                                           strides[1],
+                                                           pads[1],
+                                                           pads[3],
+                                                           1);
                 if (out_h <= 0 || out_w <= 0) {
                     report_.add_error(
                         "ERROR: " + node_context +
@@ -1543,7 +1328,8 @@ private:
             }
 
             const auto& node = *nodes[ni];
-            const std::string node_context = BuildNodeContext(node, ni);
+            const std::string node_context =
+                tc::frontend::BuildNodeContext(node, ni);
 
             if (node.get_outputs().empty()) {
                 report_.add_error("ERROR: " + node_context + " has no output");
