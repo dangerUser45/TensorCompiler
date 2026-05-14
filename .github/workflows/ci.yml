@@ -53,6 +53,56 @@ jobs:
             exit 1
           fi
 
+  full-stack-root-build-and-test:
+    name: Full Stack Root Build & Test
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+
+    steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y \
+            bash \
+            ca-certificates \
+            git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            clang-${LLVM_VERSION} \
+            cmake \
+            g++ \
+            ninja-build \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libgtest-dev \
+            llvm-${LLVM_VERSION} \
+            llvm-${LLVM_VERSION}-dev \
+            libmlir-${LLVM_VERSION}-dev \
+            mlir-${LLVM_VERSION}-tools
+
+      - name: Add LLVM tools to PATH
+        run: echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Configure (root)
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm" \
+            -DMLIR_DIR="/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/mlir"
+
+      - name: Build (root)
+        run: cmake --build build --parallel
+
+      - name: Test (root)
+        run: ctest --test-dir build --output-on-failure
+
   frontend-build-and-test:
     name: Frontend Build & Test (${{ matrix.build_type }})
     runs-on: ubuntu-latest
