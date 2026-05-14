@@ -50,6 +50,8 @@ add_library(tc_frontend_onnx STATIC
     src/mlir_emitter.cpp
     src/model_metadata.cpp
     src/dump_graph.cpp
+    src/shape_inference.cpp
+    src/graph_utils.cpp
     ${PROTO_SRCS}
 )
 

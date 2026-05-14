@@ -174,3 +174,23 @@ set_tests_properties(model_metadata_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
+
+add_executable(frontend_foundation_primitives_test
+  frontend_foundation_primitives_test.cpp
+)
+
+target_link_libraries(frontend_foundation_primitives_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME frontend_foundation_primitives_test
+  COMMAND frontend_foundation_primitives_test
+)
+
+set_tests_properties(frontend_foundation_primitives_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
