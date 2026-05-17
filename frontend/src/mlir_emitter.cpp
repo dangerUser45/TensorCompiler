@@ -1,4 +1,6 @@
 #include "mlir_emitter.hpp"
+#include "graph_utils.hpp"
+#include "shape_inference.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -126,91 +128,6 @@ std::string MlirTypeFromShape(const std::vector<int64_t>& shape,
     return out.str();
 }
 
-bool BroadcastDimsCompatibleI(int64_t lhs, int64_t rhs) noexcept
-{
-    return lhs == rhs || lhs == 1 || rhs == 1 || lhs == -1 || rhs == -1;
-}
-
-int64_t ResolveBroadcastDimI(int64_t lhs, int64_t rhs) noexcept
-{
-    if (lhs == rhs) {
-        return lhs;
-    }
-    if (lhs == 1) {
-        return rhs == -1 ? -1 : rhs;
-    }
-    if (rhs == 1) {
-        return lhs == -1 ? -1 : lhs;
-    }
-    if (lhs == -1) {
-        return rhs;
-    }
-    if (rhs == -1) {
-        return lhs;
-    }
-    return -1;
-}
-
-bool ComputeBroadcastShapeI(const std::vector<int64_t>& lhs,
-                            const std::vector<int64_t>& rhs,
-                            std::vector<int64_t>& out_shape)
-{
-    const std::size_t rank = std::max(lhs.size(), rhs.size());
-    out_shape.assign(rank, -1);
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        const std::size_t lhs_off = rank - lhs.size();
-        const std::size_t rhs_off = rank - rhs.size();
-        const int64_t l = axis < lhs_off ? 1 : lhs[axis - lhs_off];
-        const int64_t r = axis < rhs_off ? 1 : rhs[axis - rhs_off];
-        if (!BroadcastDimsCompatibleI(l, r)) {
-            return false;
-        }
-        out_shape[axis] = ResolveBroadcastDimI(l, r);
-    }
-    return true;
-}
-
-bool InferReshapeShape(const std::vector<int64_t>& input_shape,
-                       const std::vector<int64_t>& target,
-                       std::vector<int64_t>& out_shape)
-{
-    out_shape = target;
-    int64_t known = 1;
-    int64_t infer_axis = -1;
-    bool all_static = std::all_of(input_shape.begin(),
-                                  input_shape.end(),
-                                  [](int64_t v) { return v >= 0; });
-    int64_t input_count = 1;
-    for (int64_t v : input_shape) {
-        input_count *= v;
-    }
-
-    for (std::size_t i = 0; i < out_shape.size(); ++i) {
-        if (out_shape[i] == 0 && i < input_shape.size()) {
-            out_shape[i] = input_shape[i];
-        }
-        if (out_shape[i] == -1) {
-            if (infer_axis != -1) {
-                return false;
-            }
-            infer_axis = static_cast<int64_t>(i);
-            continue;
-        }
-        if (out_shape[i] < 0) {
-            return false;
-        }
-        known *= out_shape[i];
-    }
-
-    if (infer_axis >= 0) {
-        if (!all_static || known == 0 || input_count % known != 0) {
-            return false;
-        }
-        out_shape[infer_axis] = input_count / known;
-    }
-    return true;
-}
-
 bool InferNodeOutputShape(
     const tc::frontend::Node& node,
     const std::unordered_map<std::string, std::vector<int64_t>>& shapes,
@@ -247,7 +164,7 @@ bool InferNodeOutputShape(
             if (!lhs || !rhs) {
                 return false;
             }
-            return ComputeBroadcastShapeI(*lhs, *rhs, out_shape);
+            return tc::frontend::ComputeBroadcastShape(*lhs, *rhs, out_shape);
         }
         case tc::frontend::OpKind::kMatMul: {
             if (inputs.size() < 2) {
@@ -273,7 +190,9 @@ bool InferNodeOutputShape(
             if (target_it == int64_inits.end()) {
                 return false;
             }
-            return InferReshapeShape(*in_shape, target_it->second, out_shape);
+            std::string reshape_error;
+            return tc::frontend::InferReshapeOutputShape(
+                *in_shape, target_it->second, out_shape, reshape_error);
         }
         case tc::frontend::OpKind::kTranspose: {
             if (inputs.empty()) {
@@ -284,12 +203,10 @@ bool InferNodeOutputShape(
                 return false;
             }
             std::vector<int64_t> perm;
-            for (const auto& attr : node.get_attrs()) {
-                if (attr && attr->get_name() == "perm" &&
-                    attr->get_data_type().id == tc::frontend::DataID::INT64) {
-                    perm = attr->get_values<int64_t>();
-                    break;
-                }
+            const auto* perm_attr = tc::frontend::FindAttr(node, "perm");
+            if (perm_attr &&
+                perm_attr->get_data_type().id == tc::frontend::DataID::INT64) {
+                perm = perm_attr->get_values<int64_t>();
             }
             if (perm.empty()) {
                 perm.reserve(in_shape->size());
@@ -345,14 +262,20 @@ bool InferNodeOutputShape(
                 kernel[0] = (*w_shape)[2];
                 kernel[1] = (*w_shape)[3];
             }
-            const int64_t out_h = ((*in_shape)[2] + pads[0] + pads[2] -
-                                   dilations[0] * (kernel[0] - 1) - 1) /
-                                      strides[0] +
-                                  1;
-            const int64_t out_w = ((*in_shape)[3] + pads[1] + pads[3] -
-                                   dilations[1] * (kernel[1] - 1) - 1) /
-                                      strides[1] +
-                                  1;
+            const int64_t out_h =
+                tc::frontend::ComputeSpatialOutputSize((*in_shape)[2],
+                                                       kernel[0],
+                                                       strides[0],
+                                                       pads[0],
+                                                       pads[2],
+                                                       dilations[0]);
+            const int64_t out_w =
+                tc::frontend::ComputeSpatialOutputSize((*in_shape)[3],
+                                                       kernel[1],
+                                                       strides[1],
+                                                       pads[1],
+                                                       pads[3],
+                                                       dilations[1]);
             out_shape = { (*in_shape)[0], (*w_shape)[0], out_h, out_w };
             return true;
         }
@@ -384,14 +307,10 @@ bool InferNodeOutputShape(
             if (kernel[0] == 0) {
                 return false;
             }
-            const int64_t out_h =
-                ((*in_shape)[2] + pads[0] + pads[2] - (kernel[0] - 1) - 1) /
-                    strides[0] +
-                1;
-            const int64_t out_w =
-                ((*in_shape)[3] + pads[1] + pads[3] - (kernel[1] - 1) - 1) /
-                    strides[1] +
-                1;
+            const int64_t out_h = tc::frontend::ComputeSpatialOutputSize(
+                (*in_shape)[2], kernel[0], strides[0], pads[0], pads[2], 1);
+            const int64_t out_w = tc::frontend::ComputeSpatialOutputSize(
+                (*in_shape)[3], kernel[1], strides[1], pads[1], pads[3], 1);
             out_shape = { (*in_shape)[0], (*in_shape)[1], out_h, out_w };
             return true;
         }
@@ -619,19 +538,6 @@ bool BuildBroadcastDimensions(std::string_view input_type,
     return true;
 }
 
-bool EndsWith(std::string_view text, std::string_view suffix) noexcept
-{
-    return text.size() >= suffix.size() &&
-           text.compare(text.size() - suffix.size(), suffix.size(), suffix) ==
-               0;
-}
-
-bool IsSyntheticBiasAdd(const tc::frontend::Node& node) noexcept
-{
-    return node.get_op_kind() == tc::frontend::OpKind::kAdd &&
-           EndsWith(node.get_name_node(), ".add");
-}
-
 std::string FormatFloatLiteral(float value)
 {
     std::ostringstream out;
@@ -678,22 +584,11 @@ std::string EmitFloatInitializerConstant(std::ostream& out,
     return const_name;
 }
 
-const tc::frontend::Attribute* FindAttr(const tc::frontend::Node& node,
-                                        std::string_view name)
-{
-    for (const auto& attr : node.get_attrs()) {
-        if (attr && attr->get_name() == name) {
-            return attr.get();
-        }
-    }
-    return nullptr;
-}
-
 bool IntAttrEquals(const tc::frontend::Node& node,
                    std::string_view name,
                    const std::vector<int64_t>& expected)
 {
-    const auto* attr = FindAttr(node, name);
+    const auto* attr = tc::frontend::FindAttr(node, name);
     return attr && attr->get_data_type().id == tc::frontend::DataID::INT64 &&
            attr->get_values<int64_t>() == expected;
 }
@@ -715,7 +610,7 @@ bool ReadIntAttr(const tc::frontend::Node& node,
                  std::vector<int64_t>& out_values)
 {
     out_values.clear();
-    const auto* attr = FindAttr(node, name);
+    const auto* attr = tc::frontend::FindAttr(node, name);
     if (!attr || attr->get_data_type().id != tc::frontend::DataID::INT64) {
         return false;
     }
@@ -955,7 +850,8 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 MlirValue rhs = ResolveInputValue(node.get_inputs()[1]);
                 const std::string result_type =
                     ResolveTensorType(output_name, lhs.type);
-                const bool allow_channel_bias = IsSyntheticBiasAdd(node);
+                const bool allow_channel_bias =
+                    tc::frontend::IsSyntheticBiasAdd(node);
 
                 lhs = MaterializeToType(lhs, result_type, allow_channel_bias);
                 rhs = MaterializeToType(rhs, result_type, allow_channel_bias);
@@ -1078,7 +974,8 @@ bool EmitSimpleMain(const tc::frontend::Graph& graph,
                 // region body would require a multi-line MLIR parser.
                 std::string pads_clause;
                 if (!ConvHasZeroPads(node)) {
-                    const auto* pads_attr = FindAttr(node, "pads");
+                    const auto* pads_attr =
+                        tc::frontend::FindAttr(node, "pads");
                     const auto& pads = pads_attr->get_values<int64_t>();
                     std::ostringstream pc;
                     pc << " {pads = [" << pads[0] << ", " << pads[1] << ", "

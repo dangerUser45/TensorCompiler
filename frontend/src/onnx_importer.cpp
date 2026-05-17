@@ -1,5 +1,7 @@
 #include "onnx_importer.hpp"
+#include "frontend_constants.hpp"
 #include "graph.hpp"
+#include "graph_utils.hpp"
 #include "onnx.pb.h"
 
 #include <cmath>
@@ -290,15 +292,6 @@ bool BuildInitializers(const ::onnx::GraphProto& g,
     }
 
     return true;
-}
-
-std::string BuildNodeContext(const ::onnx::NodeProto& node, int node_index)
-{
-    if (!node.name().empty()) {
-        return "node[" + std::to_string(node_index) + "]('" + node.name() +
-               "')";
-    }
-    return "node[" + std::to_string(node_index) + "]";
 }
 
 ::onnx::AttributeProto_AttributeType ResolveAttributeType(
@@ -627,7 +620,8 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
                         " op 'Conv' attribute 'auto_pad' must be STRING");
             }
             const auto& value = attrs[i]->get_values<std::string>().front();
-            if (value != "NOTSET" && value != "SAME_UPPER") {
+            if (value != std::string(tc::frontend::kAutoPadNotSet) &&
+                value != std::string(tc::frontend::kAutoPadSameUpper)) {
                 return SetError(out_error,
                                 "ERROR: " + node_context +
                                     " op 'Conv' supports only "
@@ -663,7 +657,8 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
         attrs.push_back(MakeIntAttr("group", { 1 }));
     }
     if (!has_auto_pad) {
-        attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
+        attrs.push_back(MakeStringAttr(
+            "auto_pad", std::string(tc::frontend::kAutoPadNotSet)));
     }
 
     // Normalize auto_pad=SAME_UPPER to explicit pads. After normalization the
@@ -689,9 +684,9 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
 
     const std::string auto_pad_value =
         auto_pad_attr ? auto_pad_attr->get_values<std::string>().front()
-                      : std::string("NOTSET");
+                      : std::string(tc::frontend::kAutoPadNotSet);
 
-    if (auto_pad_value == "SAME_UPPER") {
+    if (auto_pad_value == std::string(tc::frontend::kAutoPadSameUpper)) {
         if (has_pads) {
             return SetError(out_error,
                             "ERROR: " + node_context +
@@ -715,7 +710,8 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
             return false;
         }
         attrs.push_back(MakeIntAttr("pads", std::move(normalized_pads)));
-        auto_pad_attr->set_values<std::string>({ "NOTSET" });
+        auto_pad_attr->set_values<std::string>(
+            { std::string(tc::frontend::kAutoPadNotSet) });
     } else if (!has_pads) {
         attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
     }
@@ -827,7 +823,7 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
                         " op 'MaxPool' attribute 'auto_pad' must be STRING");
             }
             const auto& value = attrs[i]->get_values<std::string>().front();
-            if (value != "NOTSET") {
+            if (value != std::string(tc::frontend::kAutoPadNotSet)) {
                 return SetError(out_error,
                                 "ERROR: " + node_context +
                                     " op 'MaxPool' supports only "
@@ -884,7 +880,8 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
         attrs.push_back(MakeIntAttr("pads", { 0, 0, 0, 0 }));
     }
     if (!has_auto_pad) {
-        attrs.push_back(MakeStringAttr("auto_pad", "NOTSET"));
+        attrs.push_back(MakeStringAttr(
+            "auto_pad", std::string(tc::frontend::kAutoPadNotSet)));
     }
     return true;
 }
@@ -974,7 +971,8 @@ bool ParseNode(const ::onnx::NodeProto& src,
                const std::unordered_map<std::string, std::vector<int64_t>>&
                    value_info_shapes)
 {
-    const std::string node_context = BuildNodeContext(src, node_index);
+    const std::string node_context = tc::frontend::BuildNodeContext(
+        src.name(), static_cast<std::size_t>(node_index));
     const std::string& op_type = src.op_type();
     if (op_type.empty()) {
         return SetError(out_error, "ERROR: " + node_context + " has empty op");
@@ -1088,13 +1086,18 @@ bool ParseNode(const ::onnx::NodeProto& src,
         const std::string& final_output = src.output(0);
         std::string matmul_output = final_output;
         if (has_bias) {
-            matmul_output += "__gemm_matmul_" + std::to_string(node_index);
+            matmul_output +=
+                std::string(tc::frontend::kGemmMatMulOutputSuffix) +
+                std::to_string(node_index);
         }
 
         auto matmul_node = std::make_unique<Node>();
         matmul_node->set_name_node(
-            src.name().empty() ? "gemm_matmul_" + std::to_string(node_index)
-                               : src.name() + ".matmul");
+            src.name().empty()
+                ? std::string(tc::frontend::kGemmMatMulNodePrefix) +
+                      std::to_string(node_index)
+                : src.name() +
+                      std::string(tc::frontend::kSyntheticMatMulSuffix));
         matmul_node->set_name_op("MatMul");
         matmul_node->set_op_kind(OpKind::kMatMul);
         matmul_node->set_inputs({ src.input(0), src.input(1) });
@@ -1104,8 +1107,11 @@ bool ParseNode(const ::onnx::NodeProto& src,
         if (has_bias) {
             auto add_node = std::make_unique<Node>();
             add_node->set_name_node(
-                src.name().empty() ? "gemm_add_" + std::to_string(node_index)
-                                   : src.name() + ".add");
+                src.name().empty()
+                    ? std::string(tc::frontend::kGemmAddNodePrefix) +
+                          std::to_string(node_index)
+                    : src.name() +
+                          std::string(tc::frontend::kSyntheticAddSuffix));
             add_node->set_name_op("Add");
             add_node->set_op_kind(OpKind::kAdd);
             add_node->set_inputs({ matmul_output, src.input(2) });
@@ -1212,15 +1218,18 @@ bool ParseNode(const ::onnx::NodeProto& src,
     if (op_kind == OpKind::kConv && src.input_size() == 3) {
         const std::string final_output = src.output(0);
         const std::string conv_output =
-            final_output + "__conv_" + std::to_string(node_index);
+            final_output + std::string(tc::frontend::kConvOutputSuffix) +
+            std::to_string(node_index);
         node->set_inputs({ src.input(0), src.input(1) });
         node->set_outputs({ conv_output });
         out_nodes.push_back(std::move(node));
 
         auto add_node = std::make_unique<Node>();
-        add_node->set_name_node(src.name().empty()
-                                    ? "conv_add_" + std::to_string(node_index)
-                                    : src.name() + ".add");
+        add_node->set_name_node(
+            src.name().empty()
+                ? std::string(tc::frontend::kConvAddNodePrefix) +
+                      std::to_string(node_index)
+                : src.name() + std::string(tc::frontend::kSyntheticAddSuffix));
         add_node->set_name_op("Add");
         add_node->set_op_kind(OpKind::kAdd);
         add_node->set_inputs({ conv_output, src.input(2) });
