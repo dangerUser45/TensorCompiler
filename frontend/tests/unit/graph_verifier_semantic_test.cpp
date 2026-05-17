@@ -1146,4 +1146,91 @@ TEST(GraphVerifierSemantic, MaxPoolNonPositiveOutputShapeFails)
         << DiagnosticsAsString(report);
 }
 
+TEST(GraphVerifierSemantic, EmptyGraphNameEmitsWarning)
+{
+    // VisitGraph emits a warning (not an error) when the graph name is empty.
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kRelu, "Relu", { "x" }, { "y" });
+    graph.set_name("");
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+    EXPECT_EQ(report.warning_count(), 1u);
+    EXPECT_TRUE(HasDiagnosticContaining(report, "graph has no name"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, GraphWithNoOutputTensorsFails)
+{
+    // VisitGraph emits an error when output_tensors is empty.
+    tc::frontend::Graph graph;
+    graph.set_name("no_outputs");
+
+    tc::frontend::Graph::NodeVecT nodes;
+    auto node = std::make_unique<tc::frontend::Node>();
+    node->set_name_node("n0");
+    node->set_name_op("Relu");
+    node->set_op_kind(tc::frontend::OpKind::kRelu);
+    node->set_inputs({ "x" });
+    node->set_outputs({ "y" });
+    nodes.push_back(std::move(node));
+    graph.set_nodes(std::move(nodes));
+
+    tc::frontend::Graph::TensVecT inputs;
+    auto inp = std::make_unique<tc::frontend::TensorInfo>();
+    inp->set_name("x");
+    inp->set_shape({ 1 });
+    inp->set_data_type(tc::frontend::TypeInfo<float>::type);
+    inputs.push_back(std::move(inp));
+    graph.set_input_tensors(std::move(inputs));
+    // output_tensors intentionally left empty
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "graph has no output tensors"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, NodeWithDuplicateOutputNameFails)
+{
+    // VisitNodes detects a node that lists the same output name twice.
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kRelu, "Relu", { "x" }, { "y", "y" });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "duplicate output name"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, NodeWithEmptyOutputNameFails)
+{
+    // VisitNodes detects an empty string in the output name list.
+    auto graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kRelu, "Relu", { "x" }, { "" });
+
+    tc::frontend::verify::Report report;
+    EXPECT_FALSE(tc::frontend::verify::VerifyGraphForExecution(graph, report));
+    EXPECT_TRUE(HasDiagnosticContaining(report, "has empty output name"))
+        << DiagnosticsAsString(report);
+}
+
+TEST(GraphVerifierSemantic, ConvWithDynamicSpatialDimsSkipsShapeInference)
+{
+    // When input spatial dims are -1, Conv validates attrs but skips
+    // spatial output computation. The graph must pass without a shape error.
+    auto graph = MakeConvGraph(MakeConvAttrs(),
+                               {},
+                               {
+                                   { "x", { 1, 2, -1, -1 } },
+                                   { "w", { 2, 2, 2, 2 } },
+                                   { "y", { 1, 2, -1, -1 } },
+                               });
+
+    tc::frontend::verify::Report report;
+    EXPECT_TRUE(tc::frontend::verify::VerifyGraphForExecution(graph, report))
+        << DiagnosticsAsString(report);
+}
+
 } // namespace
