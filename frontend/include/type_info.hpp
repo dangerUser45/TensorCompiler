@@ -32,8 +32,9 @@ enum class DataID
 struct DataT
 {
     DataID id = DataID::UNDEFINED;
-    std::string data_type_str = "UNDEFINED";
 };
+
+const char* DataIDToString(DataID id) noexcept;
 
 template<class T>
 struct TypeInfo;
@@ -41,73 +42,70 @@ struct TypeInfo;
 template<>
 struct TypeInfo<int8_t>
 {
-    inline static const DataT type = { DataID::INT8, "INT8" };
+    static constexpr DataT type = { DataID::INT8 };
 };
 template<>
 struct TypeInfo<int16_t>
 {
-    inline static const DataT type = { DataID::INT16, "INT16" };
+    static constexpr DataT type = { DataID::INT16 };
 };
 template<>
 struct TypeInfo<int32_t>
 {
-    inline static const DataT type = { DataID::INT32, "INT32" };
+    static constexpr DataT type = { DataID::INT32 };
 };
 template<>
 struct TypeInfo<int64_t>
 {
-    inline static const DataT type = { DataID::INT64, "INT64" };
+    static constexpr DataT type = { DataID::INT64 };
 };
 
 template<>
 struct TypeInfo<uint64_t>
 {
-    inline static const DataT type = { DataID::UNSIGNED_INT64,
-                                       "UNSIGNED_INT64" };
+    static constexpr DataT type = { DataID::UNSIGNED_INT64 };
 };
 template<>
 struct TypeInfo<uint32_t>
 {
-    inline static const DataT type = { DataID::UNSIGNED_INT32,
-                                       "UNSIGNED_INT32" };
+    static constexpr DataT type = { DataID::UNSIGNED_INT32 };
 };
 template<>
 struct TypeInfo<uint16_t>
 {
-    inline static const DataT type = { DataID::UNSIGNED_INT16,
-                                       "UNSIGNED_INT16" };
+    static constexpr DataT type = { DataID::UNSIGNED_INT16 };
 };
 template<>
 struct TypeInfo<uint8_t>
 {
-    inline static const DataT type = { DataID::UNSIGNED_INT8, "UNSIGNED_INT8" };
+    static constexpr DataT type = { DataID::UNSIGNED_INT8 };
 };
 
 template<>
 struct TypeInfo<float>
 {
-    inline static const DataT type = { DataID::FLOAT, "FLOAT" };
+    static constexpr DataT type = { DataID::FLOAT };
 };
 template<>
 struct TypeInfo<double>
 {
-    inline static const DataT type = { DataID::DOUBLE, "DOUBLE" };
+    static constexpr DataT type = { DataID::DOUBLE };
 };
 
 template<>
 struct TypeInfo<std::complex<float>>
 {
-    inline static const DataT type = { DataID::COMPLEX64, "COMPLEX64" };
+    static constexpr DataT type = { DataID::COMPLEX64 };
 };
 template<>
 struct TypeInfo<std::complex<double>>
 {
-    inline static const DataT type = { DataID::COMPLEX128, "COMPLEX128" };
+    static constexpr DataT type = { DataID::COMPLEX128 };
 };
 
 template<>
 struct TypeInfo<std::string>
 {
-    inline static const DataT type = DataT{ DataID::STRING, "STRING" };
+    static constexpr DataT type = { DataID::STRING };
 };
 } // namespace tc::frontend

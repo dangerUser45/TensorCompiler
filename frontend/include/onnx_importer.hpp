@@ -2,14 +2,14 @@
 
 #include <string>
 
-#include "graph.hpp"
-
 namespace tc::frontend {
-namespace onnx {
+class Graph;
+} // namespace tc::frontend
+
+namespace tc::frontend::onnx {
 
 bool ImportOnnxToGraph(const std::string& path,
                        Graph& out_graph,
                        std::string& out_error);
 
-} // namespace onnx
-} // namespace tc::frontend
+} // namespace tc::frontend::onnx

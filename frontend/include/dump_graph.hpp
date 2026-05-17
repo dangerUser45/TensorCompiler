@@ -1,11 +1,9 @@
 #pragma once
 
-#include <cstdint>
 #include <iosfwd>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 #include "graph.hpp"
 
@@ -29,37 +27,6 @@ private:
 
     void begin_table();
     void end_table();
-
-    template<typename T>
-    std::string print_vector(const std::vector<T>& values);
-
-    template<typename T>
-    std::string value_to_string(const T& value);
-
-    template<typename T>
-    std::string print_vector_multiline_html(const std::vector<T>& values);
-
-    std::string normalize_name(std::string name);
-
-    std::string print_shape(const std::vector<int64_t>& shape);
-    std::string print_names(const std::vector<std::string>& names);
-    std::string print_names_multiline_html(
-        const std::vector<std::string>& names);
-
-    std::string to_upper(std::string value);
-
-    std::string tensor_id(const TensorInfo& tensor,
-                          const std::string& prefix,
-                          size_t index);
-    std::string node_id(const Node& node, size_t index);
-    int64_t element_count(const std::vector<int64_t>& shape);
-
-    std::string init_values_as_string(const Initializers& init);
-    std::string init_values_as_multiline_html(const Initializers& init);
-
-    std::string attr_values_as_string(const Attribute& attr);
-
-    int edge_minlen_from_label(const std::string& label);
 
     void print_io_header();
     void print_io_tensors(const Graph::TensVecT& tensors,

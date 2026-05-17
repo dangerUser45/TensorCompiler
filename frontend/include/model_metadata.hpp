@@ -2,7 +2,9 @@
 
 #include <string>
 
-#include "graph.hpp"
+namespace tc::frontend {
+class Graph;
+} // namespace tc::frontend
 
 namespace tc::frontend::metadata {
 

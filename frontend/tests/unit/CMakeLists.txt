@@ -24,11 +24,8 @@ add_executable(op_kind_test
   op_kind_test.cpp
 )
 
-target_include_directories(op_kind_test PRIVATE
-  ${PROJECT_SOURCE_DIR}/include
-)
-
 target_link_libraries(op_kind_test PRIVATE
+  tc_frontend_onnx
   ${TC_GTEST_MAIN_TARGET}
   project_warnings
 )
@@ -211,6 +208,26 @@ add_test(
 )
 
 set_tests_properties(frontend_foundation_primitives_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+
+add_executable(type_info_test
+  type_info_test.cpp
+)
+
+target_link_libraries(type_info_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME type_info_test
+  COMMAND type_info_test
+)
+
+set_tests_properties(type_info_test PROPERTIES
   LABELS "unit"
   WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )

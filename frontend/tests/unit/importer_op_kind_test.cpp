@@ -1,3 +1,4 @@
+#include "graph.hpp"
 #include "onnx.pb.h"
 #include "onnx_importer.hpp"
 #include "op_kind.hpp"

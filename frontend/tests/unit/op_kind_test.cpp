@@ -33,17 +33,18 @@ TEST(OpKind, MapsUnknownOperatorToUnknown)
 
 TEST(OpKind, HasStableStringNames)
 {
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kRelu), "Relu");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kAdd), "Add");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kMul), "Mul");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kConv), "Conv");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kMatMul), "MatMul");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kReshape),
-              "Reshape");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kTranspose),
-              "Transpose");
-    EXPECT_EQ(tc::frontend::ToString(tc::frontend::OpKind::kUnknown),
-              "Unknown");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kRelu), "Relu");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kAdd), "Add");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kMul), "Mul");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kConv), "Conv");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kMatMul),
+                 "MatMul");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kReshape),
+                 "Reshape");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kTranspose),
+                 "Transpose");
+    EXPECT_STREQ(tc::frontend::ToString(tc::frontend::OpKind::kUnknown),
+                 "Unknown");
 }
 
 TEST(GraphNode, OpKindDefaultsToUnknown)

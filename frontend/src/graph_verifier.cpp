@@ -1,4 +1,5 @@
 #include "graph_verifier.hpp"
+#include "graph.hpp"
 #include "graph_utils.hpp"
 #include "op_traits.hpp"
 #include "shape_inference.hpp"
@@ -14,10 +15,7 @@ namespace {
 
 std::string DtypeName(const tc::frontend::DataT& type)
 {
-    if (!type.data_type_str.empty()) {
-        return type.data_type_str;
-    }
-    return "UNDEFINED";
+    return tc::frontend::DataIDToString(type.id);
 }
 
 bool ShapesMatchForMvp(const std::vector<int64_t>& lhs,

@@ -42,7 +42,7 @@ std::unique_ptr<tc::frontend::TensorInfo> MakeTensor(std::string name,
     auto tensor = std::make_unique<tc::frontend::TensorInfo>();
     tensor->set_name(std::move(name));
     tensor->set_shape(std::move(shape));
-    tensor->set_data_type({ id, "" });
+    tensor->set_data_type({ id });
     return tensor;
 }
 
