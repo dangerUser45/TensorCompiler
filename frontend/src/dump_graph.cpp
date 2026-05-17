@@ -271,7 +271,7 @@ std::string DumpGraph::attr_values_as_string(const Attribute& attr)
     return dispatch_typed(
         attr,
         [this](const auto& v) { return print_vector(v); },
-        "(" + attr.get_data_type().data_type_str + ")");
+        "(" + std::string(DataIDToString(attr.get_data_type().id)) + ")");
 }
 
 int DumpGraph::edge_minlen_from_label(const std::string& label)
@@ -305,8 +305,8 @@ void DumpGraph::print_io_tensors(const Graph::TensVecT& tensors,
              << "\"><B>name</B>: " << normalize_name(tensors[i]->get_name())
              << "</TD></TR>\n\t\t\t\t"
                 "<TR><TD BGCOLOR=\""
-             << IO_BASE_COLOR
-             << "\"><B>dtype</B>: " << tensors[i]->get_data_type().data_type_str
+             << IO_BASE_COLOR << "\"><B>dtype</B>: "
+             << DataIDToString(tensors[i]->get_data_type().id)
              << "</TD></TR>\n\t\t\t\t"
                 "<TR><TD BGCOLOR=\""
              << IO_BASE_COLOR
@@ -333,8 +333,8 @@ void DumpGraph::print_inits(const Graph::InitVecT& inits)
              << INITS_BASE_COLOR << "\"><B>name</B>: " << inits[i]->get_name()
              << "</TD></TR>\n\t\t\t\t"
                 "<TR><TD BGCOLOR=\""
-             << INITS_BASE_COLOR
-             << "\"><B>dtype</B>: " << inits[i]->get_data_type().data_type_str
+             << INITS_BASE_COLOR << "\"><B>dtype</B>: "
+             << DataIDToString(inits[i]->get_data_type().id)
              << "</TD></TR>\n\t\t\t\t"
                 "<TR><TD BGCOLOR=\""
              << INITS_BASE_COLOR
