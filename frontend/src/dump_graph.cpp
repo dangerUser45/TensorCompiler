@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -14,6 +15,63 @@
 namespace tc::frontend {
 
 namespace {
+
+template<typename T>
+std::string print_vector(const std::vector<T>& values)
+{
+    std::ostringstream oss;
+    oss << "[";
+
+    for (size_t i = 0; i != values.size(); ++i) {
+        if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                      std::is_same_v<T, int32_t> ||
+                      std::is_same_v<T, int64_t> ||
+                      std::is_same_v<T, uint8_t> ||
+                      std::is_same_v<T, uint16_t> ||
+                      std::is_same_v<T, uint32_t> ||
+                      std::is_same_v<T, uint64_t>) {
+            oss << static_cast<long long>(values[i]);
+        } else {
+            oss << values[i];
+        }
+
+        if (i + 1 != values.size())
+            oss << ", ";
+    }
+
+    oss << "]";
+    return oss.str();
+}
+
+template<typename T>
+std::string value_to_string(const T& value)
+{
+    std::ostringstream oss;
+    if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                  std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t> ||
+                  std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> ||
+                  std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>) {
+        oss << static_cast<long long>(value);
+    } else {
+        oss << value;
+    }
+    return oss.str();
+}
+
+template<typename T>
+std::string print_vector_multiline_html(const std::vector<T>& values)
+{
+    if (values.empty())
+        return "[]";
+
+    std::ostringstream oss;
+    for (size_t i = 0; i != values.size(); ++i) {
+        oss << value_to_string(values[i]);
+        if (i + 1 != values.size())
+            oss << "<BR ALIGN=\"LEFT\"/>";
+    }
+    return oss.str();
+}
 
 template<typename ValSource, typename Fn>
 std::string dispatch_typed(const ValSource& src, Fn fn, std::string fallback)
@@ -48,6 +106,100 @@ std::string dispatch_typed(const ValSource& src, Fn fn, std::string fallback)
     } catch (...) {
         return fallback;
     }
+}
+
+std::string normalize_name(std::string name)
+{
+    for (char& c : name) {
+        if (!std::isalnum(static_cast<unsigned char>(c))) {
+            c = '_';
+        }
+    }
+    return name;
+}
+
+std::string print_shape(const std::vector<int64_t>& shape)
+{
+    return print_vector(shape);
+}
+
+std::string print_names_multiline_html(const std::vector<std::string>& names)
+{
+    if (names.empty())
+        return "(none)";
+
+    std::ostringstream oss;
+    for (size_t i = 0; i != names.size(); ++i) {
+        oss << names[i];
+        if (i + 1 != names.size())
+            oss << "<BR ALIGN=\"LEFT\"/>";
+    }
+    return oss.str();
+}
+
+std::string to_upper(std::string value)
+{
+    for (char& c : value) {
+        if (c >= 'a' && c <= 'z')
+            c = static_cast<char>(c - ('a' - 'A'));
+    }
+    return value;
+}
+
+std::string tensor_id(const TensorInfo& tensor,
+                      const std::string& prefix,
+                      size_t index)
+{
+    if (!tensor.get_name().empty())
+        return normalize_name(tensor.get_name());
+    return normalize_name(prefix) + "_" + std::to_string(index);
+}
+
+std::string node_id(const Node& node, size_t index)
+{
+    if (!node.get_name_node().empty())
+        return normalize_name(node.get_name_node());
+    return "op_" + std::to_string(index);
+}
+
+int64_t element_count(const std::vector<int64_t>& shape)
+{
+    if (shape.empty())
+        return 0;
+
+    int64_t count = 1;
+    for (const int64_t dim : shape) {
+        if (dim <= 0)
+            return -1;
+        if (count > std::numeric_limits<int64_t>::max() / dim)
+            return -1;
+        count *= dim;
+    }
+    return count;
+}
+
+std::string init_values_as_multiline_html(const Initializers& init)
+{
+    return dispatch_typed(
+        init,
+        [](const auto& v) { return print_vector_multiline_html(v); },
+        "(unknown)");
+}
+
+std::string attr_values_as_string(const Attribute& attr)
+{
+    return dispatch_typed(
+        attr,
+        [](const auto& v) { return print_vector(v); },
+        "(" + std::string(DataIDToString(attr.get_data_type().id)) + ")");
+}
+
+int edge_minlen_from_label(const std::string& label)
+{
+    constexpr size_t kCharsPerRank = 12;
+    constexpr int kMaxMinLen = 12;
+    const int minlen = 1 + static_cast<int>(label.size() / kCharsPerRank);
+    return std::min(minlen, kMaxMinLen);
 }
 
 } // anonymous namespace
@@ -115,171 +267,6 @@ void DumpGraph::begin_table()
 void DumpGraph::end_table()
 {
     out_ << "</TABLE>\n\t\t>\n\t];\n\n\t";
-}
-
-template<typename T>
-std::string DumpGraph::print_vector(const std::vector<T>& values)
-{
-    std::ostringstream oss;
-    oss << "[";
-
-    for (size_t i = 0; i != values.size(); ++i) {
-        if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                      std::is_same_v<T, int32_t> ||
-                      std::is_same_v<T, int64_t> ||
-                      std::is_same_v<T, uint8_t> ||
-                      std::is_same_v<T, uint16_t> ||
-                      std::is_same_v<T, uint32_t> ||
-                      std::is_same_v<T, uint64_t>) {
-            oss << static_cast<long long>(values[i]);
-        } else {
-            oss << values[i];
-        }
-
-        if (i + 1 != values.size())
-            oss << ", ";
-    }
-
-    oss << "]";
-    return oss.str();
-}
-
-template<typename T>
-std::string DumpGraph::value_to_string(const T& value)
-{
-    std::ostringstream oss;
-    if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                  std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t> ||
-                  std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> ||
-                  std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>) {
-        oss << static_cast<long long>(value);
-    } else {
-        oss << value;
-    }
-    return oss.str();
-}
-
-template<typename T>
-std::string DumpGraph::print_vector_multiline_html(const std::vector<T>& values)
-{
-    if (values.empty())
-        return "[]";
-
-    std::ostringstream oss;
-    for (size_t i = 0; i != values.size(); ++i) {
-        oss << value_to_string(values[i]);
-        if (i + 1 != values.size())
-            oss << "<BR ALIGN=\"LEFT\"/>";
-    }
-    return oss.str();
-}
-
-std::string DumpGraph::normalize_name(std::string name)
-{
-    for (char& c : name) {
-        if (!std::isalnum(static_cast<unsigned char>(c))) {
-            c = '_';
-        }
-    }
-    return name;
-}
-
-std::string DumpGraph::print_shape(const std::vector<int64_t>& shape)
-{
-    return print_vector(shape);
-}
-
-std::string DumpGraph::print_names(const std::vector<std::string>& names)
-{
-    if (names.empty())
-        return "(none)";
-    return print_vector(names);
-}
-
-std::string DumpGraph::print_names_multiline_html(
-    const std::vector<std::string>& names)
-{
-    if (names.empty())
-        return "(none)";
-
-    std::ostringstream oss;
-    for (size_t i = 0; i != names.size(); ++i) {
-        oss << names[i];
-        if (i + 1 != names.size())
-            oss << "<BR ALIGN=\"LEFT\"/>";
-    }
-    return oss.str();
-}
-
-std::string DumpGraph::to_upper(std::string value)
-{
-    for (char& c : value) {
-        if (c >= 'a' && c <= 'z')
-            c = static_cast<char>(c - ('a' - 'A'));
-    }
-    return value;
-}
-
-std::string DumpGraph::tensor_id(const TensorInfo& tensor,
-                                 const std::string& prefix,
-                                 size_t index)
-{
-    if (!tensor.get_name().empty())
-        return normalize_name(tensor.get_name());
-    return normalize_name(prefix) + "_" + std::to_string(index);
-}
-
-std::string DumpGraph::node_id(const Node& node, size_t index)
-{
-    if (!node.get_name_node().empty())
-        return normalize_name(node.get_name_node());
-    return "op_" + std::to_string(index);
-}
-
-int64_t DumpGraph::element_count(const std::vector<int64_t>& shape)
-{
-    if (shape.empty())
-        return 0;
-
-    int64_t count = 1;
-    for (const int64_t dim : shape) {
-        if (dim <= 0)
-            return -1;
-        if (count > std::numeric_limits<int64_t>::max() / dim)
-            return -1;
-        count *= dim;
-    }
-    return count;
-}
-
-std::string DumpGraph::init_values_as_string(const Initializers& init)
-{
-    return dispatch_typed(
-        init, [this](const auto& v) { return print_vector(v); }, "(unknown)");
-}
-
-std::string DumpGraph::init_values_as_multiline_html(const Initializers& init)
-{
-    return dispatch_typed(
-        init,
-        [this](const auto& v) { return print_vector_multiline_html(v); },
-        "(unknown)");
-}
-
-std::string DumpGraph::attr_values_as_string(const Attribute& attr)
-{
-    return dispatch_typed(
-        attr,
-        [this](const auto& v) { return print_vector(v); },
-        "(" + std::string(DataIDToString(attr.get_data_type().id)) + ")");
-}
-
-int DumpGraph::edge_minlen_from_label(const std::string& label)
-{
-    constexpr size_t kCharsPerRank = 12;
-    constexpr int kMaxMinLen = 12;
-    const int minlen = 1 + static_cast<int>(label.size() / kCharsPerRank);
-    return std::min(minlen, kMaxMinLen);
 }
 
 void DumpGraph::print_io_header()
