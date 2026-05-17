@@ -1100,6 +1100,48 @@ private:
         }
     }
 
+    void ValidateTransposeAttrs(
+        const std::string& node_context,
+        const std::unordered_map<std::string, const tc::frontend::Attribute*>&
+            attrs_by_name)
+    {
+        const auto perm_it = attrs_by_name.find("perm");
+        if (perm_it == attrs_by_name.end())
+            return;
+
+        const auto* perm_attr = perm_it->second;
+        if (perm_attr->get_data_type().id != tc::frontend::DataID::INT64) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Transpose' attribute 'perm' must be INTS");
+            return;
+        }
+
+        const auto& perm = perm_attr->get_values<int64_t>();
+        if (perm.empty()) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Transpose' attribute 'perm' is empty");
+            return;
+        }
+
+        std::unordered_set<int64_t> seen_axes;
+        seen_axes.reserve(perm.size());
+        for (const int64_t axis : perm) {
+            if (axis < 0) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'Transpose' attribute 'perm' contains "
+                                  "negative axis " +
+                                  std::to_string(axis));
+            }
+
+            if (!seen_axes.insert(axis).second) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'Transpose' attribute 'perm' has "
+                                  "duplicate axis " +
+                                  std::to_string(axis));
+            }
+        }
+    }
+
     void ValidateNodeAttributes(const tc::frontend::Node& node,
                                 const std::string& node_context)
     {
@@ -1161,46 +1203,9 @@ private:
             }
         }
 
-        if (op_kind != tc::frontend::OpKind::kTranspose) {
+        if (op_kind != tc::frontend::OpKind::kTranspose)
             return;
-        }
-
-        const auto perm_it = attrs_by_name.find("perm");
-        if (perm_it == attrs_by_name.end()) {
-            return;
-        }
-
-        const auto* perm_attr = perm_it->second;
-        if (perm_attr->get_data_type().id != tc::frontend::DataID::INT64) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Transpose' attribute 'perm' must be INTS");
-            return;
-        }
-
-        const auto& perm = perm_attr->get_values<int64_t>();
-        if (perm.empty()) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Transpose' attribute 'perm' is empty");
-            return;
-        }
-
-        std::unordered_set<int64_t> seen_axes;
-        seen_axes.reserve(perm.size());
-        for (const int64_t axis : perm) {
-            if (axis < 0) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'Transpose' attribute 'perm' contains "
-                                  "negative axis " +
-                                  std::to_string(axis));
-            }
-
-            if (!seen_axes.insert(axis).second) {
-                report_.add_error("ERROR: " + node_context +
-                                  " op 'Transpose' attribute 'perm' has "
-                                  "duplicate axis " +
-                                  std::to_string(axis));
-            }
-        }
+        ValidateTransposeAttrs(node_context, attrs_by_name);
     }
 
     void VisitOutputTensors(const tc::frontend::Graph::TensVecT& outputs)
