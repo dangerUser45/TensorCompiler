@@ -71,7 +71,8 @@ target_link_libraries(tc_frontend_onnx PRIVATE project_warnings)
 
 add_executable(frontend_driver
     src/frontend_driver.cpp
-    tests/end2end/src/graph_hash.cpp    
+    src/backend_runner.cpp
+    tests/end2end/src/graph_hash.cpp
 )
 
 target_compile_definitions(frontend_driver PRIVATE
