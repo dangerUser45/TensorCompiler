@@ -275,6 +275,68 @@ private:
         }
     }
 
+    bool RequireUnaryNumericInput(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        const std::unordered_map<std::string, tc::frontend::DataT>&
+            tensor_dtypes,
+        tc::frontend::DataT& out_dtype)
+    {
+        if (node.get_inputs().empty())
+            return false;
+        if (!ResolveInputDtype(node, node_context, 0, tensor_dtypes, out_dtype))
+            return false;
+        if (!tc::frontend::IsSupportedNumericDtype(out_dtype.id)) {
+            report_.add_error(
+                "ERROR: " + node_context + " op '" +
+                std::string(tc::frontend::ToString(node.get_op_kind())) +
+                "' expects numeric dtype, got " + DtypeName(out_dtype));
+            return false;
+        }
+        return true;
+    }
+
+    bool RequireBinaryMatchingNumericInputs(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        const std::unordered_map<std::string, tc::frontend::DataT>&
+            tensor_dtypes,
+        tc::frontend::DataT& out_lhs,
+        tc::frontend::DataT& out_rhs)
+    {
+        if (node.get_inputs().size() < 2)
+            return false;
+        if (!ResolveInputDtype(node, node_context, 0, tensor_dtypes, out_lhs))
+            return false;
+        if (!ResolveInputDtype(node, node_context, 1, tensor_dtypes, out_rhs))
+            return false;
+        if (!tc::frontend::IsSupportedNumericDtype(out_lhs.id)) {
+            report_.add_error(
+                "ERROR: " + node_context + " op '" +
+                std::string(tc::frontend::ToString(node.get_op_kind())) +
+                "' expects numeric dtype for input[0], got " +
+                DtypeName(out_lhs));
+            return false;
+        }
+        if (!tc::frontend::IsSupportedNumericDtype(out_rhs.id)) {
+            report_.add_error(
+                "ERROR: " + node_context + " op '" +
+                std::string(tc::frontend::ToString(node.get_op_kind())) +
+                "' expects numeric dtype for input[1], got " +
+                DtypeName(out_rhs));
+            return false;
+        }
+        if (out_lhs.id != out_rhs.id) {
+            report_.add_error(
+                "ERROR: " + node_context + " op '" +
+                std::string(tc::frontend::ToString(node.get_op_kind())) +
+                "' input dtypes mismatch: " + DtypeName(out_lhs) + " vs " +
+                DtypeName(out_rhs));
+            return false;
+        }
+        return true;
+    }
+
     void ValidateNodeDtypes(
         const tc::frontend::Node& node,
         const std::string& node_context,
@@ -286,26 +348,11 @@ private:
         switch (node.get_op_kind()) {
             case tc::frontend::OpKind::kRelu:
             case tc::frontend::OpKind::kTranspose: {
-                if (node.get_inputs().empty()) {
+                tc::frontend::DataT dtype;
+                if (!RequireUnaryNumericInput(
+                        node, node_context, tensor_dtypes, dtype))
                     return;
-                }
-
-                tc::frontend::DataT input_dtype;
-                if (!ResolveInputDtype(
-                        node, node_context, 0, tensor_dtypes, input_dtype)) {
-                    return;
-                }
-
-                if (!tc::frontend::IsSupportedNumericDtype(input_dtype.id)) {
-                    report_.add_error("ERROR: " + node_context + " op '" +
-                                      std::string(tc::frontend::ToString(
-                                          node.get_op_kind())) +
-                                      "' expects numeric dtype, got " +
-                                      DtypeName(input_dtype));
-                    return;
-                }
-
-                inferred_output_dtype = input_dtype;
+                inferred_output_dtype = dtype;
                 has_inferred_output_dtype = true;
                 break;
             }
@@ -313,51 +360,12 @@ private:
             case tc::frontend::OpKind::kAdd:
             case tc::frontend::OpKind::kMul:
             case tc::frontend::OpKind::kMatMul: {
-                if (node.get_inputs().size() < 2) {
+                tc::frontend::DataT lhs;
+                tc::frontend::DataT rhs;
+                if (!RequireBinaryMatchingNumericInputs(
+                        node, node_context, tensor_dtypes, lhs, rhs))
                     return;
-                }
-
-                tc::frontend::DataT lhs_dtype;
-                tc::frontend::DataT rhs_dtype;
-                const bool lhs_ok = ResolveInputDtype(
-                    node, node_context, 0, tensor_dtypes, lhs_dtype);
-                const bool rhs_ok = ResolveInputDtype(
-                    node, node_context, 1, tensor_dtypes, rhs_dtype);
-                if (!lhs_ok || !rhs_ok) {
-                    return;
-                }
-
-                if (!tc::frontend::IsSupportedNumericDtype(lhs_dtype.id)) {
-                    report_.add_error(
-                        "ERROR: " + node_context + " op '" +
-                        std::string(
-                            tc::frontend::ToString(node.get_op_kind())) +
-                        "' expects numeric dtype for input[0], got " +
-                        DtypeName(lhs_dtype));
-                    return;
-                }
-
-                if (!tc::frontend::IsSupportedNumericDtype(rhs_dtype.id)) {
-                    report_.add_error(
-                        "ERROR: " + node_context + " op '" +
-                        std::string(
-                            tc::frontend::ToString(node.get_op_kind())) +
-                        "' expects numeric dtype for input[1], got " +
-                        DtypeName(rhs_dtype));
-                    return;
-                }
-
-                if (lhs_dtype.id != rhs_dtype.id) {
-                    report_.add_error(
-                        "ERROR: " + node_context + " op '" +
-                        std::string(
-                            tc::frontend::ToString(node.get_op_kind())) +
-                        "' input dtypes mismatch: " + DtypeName(lhs_dtype) +
-                        " vs " + DtypeName(rhs_dtype));
-                    return;
-                }
-
-                inferred_output_dtype = lhs_dtype;
+                inferred_output_dtype = lhs;
                 has_inferred_output_dtype = true;
                 break;
             }
