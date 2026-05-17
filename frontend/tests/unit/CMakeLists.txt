@@ -43,6 +43,26 @@ set_tests_properties(op_kind_test PROPERTIES
   WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
+add_executable(op_traits_test
+  op_traits_test.cpp
+)
+
+target_link_libraries(op_traits_test PRIVATE
+  tc_frontend_onnx
+  ${TC_GTEST_MAIN_TARGET}
+  project_warnings
+)
+
+add_test(
+  NAME op_traits_test
+  COMMAND op_traits_test
+)
+
+set_tests_properties(op_traits_test PROPERTIES
+  LABELS "unit"
+  WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+
 add_executable(importer_op_kind_test
   importer_op_kind_test.cpp
 )

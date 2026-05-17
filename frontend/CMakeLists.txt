@@ -52,6 +52,7 @@ add_library(tc_frontend_onnx STATIC
     src/dump_graph.cpp
     src/shape_inference.cpp
     src/graph_utils.cpp
+    src/op_traits.cpp
     ${PROTO_SRCS}
 )
 

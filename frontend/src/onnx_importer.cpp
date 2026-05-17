@@ -3,6 +3,7 @@
 #include "graph.hpp"
 #include "graph_utils.hpp"
 #include "onnx.pb.h"
+#include "op_traits.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -924,39 +925,39 @@ bool NormalizeNodeAttributes(OpKind op_kind,
                                 " has duplicate attribute '" + attr_name + "'");
         }
 
-        switch (op_kind) {
-            case OpKind::kRelu:
-            case OpKind::kAdd:
-            case OpKind::kMul:
-            case OpKind::kConv:
-            case OpKind::kMatMul:
-            case OpKind::kReshape:
-            case OpKind::kMaxPool:
-                return SetError(out_error,
-                                "ERROR: " + node_context + " op '" +
-                                    std::string(ToString(op_kind)) +
-                                    "' does not support attribute '" +
-                                    attr_name + "'");
-
-            case OpKind::kTranspose:
-                if (attr_name != "perm") {
-                    return SetError(out_error,
-                                    "ERROR: " + node_context +
-                                        " op 'Transpose' has "
-                                        "unsupported attribute '" +
-                                        attr_name + "'");
-                }
-                if (attrs[i]->get_data_type().id != DataID::INT64) {
-                    return SetError(
-                        out_error,
-                        "ERROR: " + node_context +
-                            " op 'Transpose' attribute 'perm' must be INTS");
-                }
-                break;
-
-            case OpKind::kUnknown:
-                break;
+        if (op_kind == OpKind::kUnknown) {
+            continue;
         }
+
+        if (!SupportsAttributes(op_kind)) {
+            return SetError(out_error,
+                            "ERROR: " + node_context + " op '" +
+                                std::string(ToString(op_kind)) +
+                                "' does not support attribute '" + attr_name +
+                                "'");
+        }
+
+        if (op_kind == OpKind::kTranspose) {
+            if (attr_name != "perm") {
+                return SetError(out_error,
+                                "ERROR: " + node_context +
+                                    " op 'Transpose' has unsupported "
+                                    "attribute '" +
+                                    attr_name + "'");
+            }
+            if (attrs[i]->get_data_type().id != DataID::INT64) {
+                return SetError(
+                    out_error,
+                    "ERROR: " + node_context +
+                        " op 'Transpose' attribute 'perm' must be INTS");
+            }
+            continue;
+        }
+
+        return SetError(out_error,
+                        "ERROR: " + node_context + " op '" +
+                            std::string(ToString(op_kind)) +
+                            "' has unsupported attribute '" + attr_name + "'");
     }
 
     return true;
