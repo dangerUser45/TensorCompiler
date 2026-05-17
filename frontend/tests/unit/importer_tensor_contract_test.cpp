@@ -1,3 +1,4 @@
+#include "graph.hpp"
 #include "onnx_importer.hpp"
 
 #include <filesystem>

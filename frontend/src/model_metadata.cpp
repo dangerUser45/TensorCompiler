@@ -1,4 +1,5 @@
 #include "model_metadata.hpp"
+#include "graph.hpp"
 
 #include <cstdint>
 #include <sstream>

@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "graph.hpp"
+namespace tc::frontend {
+class Graph;
+} // namespace tc::frontend
 
 namespace tc::frontend::verify {
 

@@ -1,4 +1,5 @@
 #include "mlir_emitter.hpp"
+#include "graph.hpp"
 #include "graph_utils.hpp"
 #include "op_traits.hpp"
 #include "shape_inference.hpp"

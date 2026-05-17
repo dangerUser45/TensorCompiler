@@ -1,3 +1,4 @@
+#include "graph.hpp"
 #include "graph_verifier.hpp"
 
 #include <memory>
