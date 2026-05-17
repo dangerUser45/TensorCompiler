@@ -24,11 +24,8 @@ add_executable(op_kind_test
   op_kind_test.cpp
 )
 
-target_include_directories(op_kind_test PRIVATE
-  ${PROJECT_SOURCE_DIR}/include
-)
-
 target_link_libraries(op_kind_test PRIVATE
+  tc_frontend_onnx
   ${TC_GTEST_MAIN_TARGET}
   project_warnings
 )
