@@ -1,5 +1,6 @@
 #include "mlir_emitter.hpp"
 #include "graph_utils.hpp"
+#include "op_traits.hpp"
 #include "shape_inference.hpp"
 
 #include <algorithm>
@@ -408,38 +409,17 @@ bool CanEmitSimpleEntry(const tc::frontend::Graph& graph) noexcept
         if (!node_ptr) {
             return false;
         }
+
         const auto kind = node_ptr->get_op_kind();
-        if (kind != tc::frontend::OpKind::kRelu &&
-            kind != tc::frontend::OpKind::kTranspose &&
-            kind != tc::frontend::OpKind::kAdd &&
-            kind != tc::frontend::OpKind::kMul &&
-            kind != tc::frontend::OpKind::kConv &&
-            kind != tc::frontend::OpKind::kReshape &&
-            kind != tc::frontend::OpKind::kMatMul &&
-            kind != tc::frontend::OpKind::kMaxPool) {
+        const auto* traits = tc::frontend::GetOpTraits(kind);
+        if (!traits || !traits->strict_mlir_supported) {
             return false;
         }
-        std::size_t expected_inputs = 0;
-        switch (kind) {
-            case tc::frontend::OpKind::kRelu:
-            case tc::frontend::OpKind::kTranspose:
-                expected_inputs = 1;
-                break;
-            case tc::frontend::OpKind::kAdd:
-            case tc::frontend::OpKind::kMul:
-            case tc::frontend::OpKind::kConv:
-            case tc::frontend::OpKind::kReshape:
-            case tc::frontend::OpKind::kMatMul:
-                expected_inputs = 2;
-                break;
-            case tc::frontend::OpKind::kMaxPool:
-                expected_inputs = 1;
-                break;
-            case tc::frontend::OpKind::kUnknown:
-                return false;
-        }
-        if (node_ptr->get_inputs().size() != expected_inputs ||
-            node_ptr->get_outputs().size() != 1) {
+
+        const std::size_t input_count = node_ptr->get_inputs().size();
+        if (input_count < traits->inputs.min ||
+            input_count > traits->inputs.max ||
+            node_ptr->get_outputs().size() != traits->outputs) {
             return false;
         }
     }
