@@ -1,5 +1,6 @@
 #include "graph_verifier.hpp"
 #include "graph_utils.hpp"
+#include "op_traits.hpp"
 #include "shape_inference.hpp"
 
 #include <algorithm>
@@ -165,50 +166,38 @@ private:
         const std::size_t input_count = node.get_inputs().size();
         const std::size_t output_count = node.get_outputs().size();
 
-        if (op_kind == tc::frontend::OpKind::kUnknown) {
+        const tc::frontend::OpTraits* traits =
+            tc::frontend::GetOpTraits(op_kind);
+        if (!traits) {
             report_.add_error("ERROR: " + node_context +
                               " has unknown op kind");
             return;
         }
 
-        switch (op_kind) {
-            case tc::frontend::OpKind::kRelu:
-                if (input_count != 1) {
-                    AddArityError(
-                        node_context, op_kind, "input(s)", 1, input_count);
-                }
-                if (output_count != 1) {
-                    AddArityError(
-                        node_context, op_kind, "output(s)", 1, output_count);
-                }
-                break;
-            case tc::frontend::OpKind::kAdd:
-            case tc::frontend::OpKind::kMul:
-            case tc::frontend::OpKind::kMatMul:
-            case tc::frontend::OpKind::kConv:
-            case tc::frontend::OpKind::kReshape:
-                if (input_count != 2) {
-                    AddArityError(
-                        node_context, op_kind, "input(s)", 2, input_count);
-                }
-                if (output_count != 1) {
-                    AddArityError(
-                        node_context, op_kind, "output(s)", 1, output_count);
-                }
-                break;
-            case tc::frontend::OpKind::kTranspose:
-            case tc::frontend::OpKind::kMaxPool:
-                if (input_count != 1) {
-                    AddArityError(
-                        node_context, op_kind, "input(s)", 1, input_count);
-                }
-                if (output_count != 1) {
-                    AddArityError(
-                        node_context, op_kind, "output(s)", 1, output_count);
-                }
-                break;
-            case tc::frontend::OpKind::kUnknown:
-                break;
+        if (input_count < traits->inputs.min ||
+            input_count > traits->inputs.max) {
+            if (traits->inputs.min == traits->inputs.max) {
+                AddArityError(node_context,
+                              op_kind,
+                              "input(s)",
+                              traits->inputs.min,
+                              input_count);
+            } else {
+                report_.add_error(
+                    "ERROR: " + node_context + " op '" +
+                    std::string(tc::frontend::ToString(op_kind)) +
+                    "' expects " + std::to_string(traits->inputs.min) + ".." +
+                    std::to_string(traits->inputs.max) + " input(s), got " +
+                    std::to_string(input_count));
+            }
+        }
+
+        if (output_count != traits->outputs) {
+            AddArityError(node_context,
+                          op_kind,
+                          "output(s)",
+                          traits->outputs,
+                          output_count);
         }
 
         ValidateNodeAttributes(node, node_context);
