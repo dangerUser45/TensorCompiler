@@ -571,452 +571,389 @@ private:
         }
     }
 
+    void ValidateReluShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().empty())
+            return;
+        std::vector<int64_t> input_shape;
+        if (!ResolveInputShape(
+                node, node_context, 0, tensor_shapes, input_shape))
+            return;
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Relu", input_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, input_shape, tensor_shapes);
+    }
+
+    void ValidateAddShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().size() < 2)
+            return;
+        std::vector<int64_t> lhs_shape;
+        std::vector<int64_t> rhs_shape;
+        if (!ResolveBinaryInputShapes(
+                node, node_context, tensor_shapes, lhs_shape, rhs_shape))
+            return;
+        std::vector<int64_t> inferred_shape;
+        if (!tc::frontend::ComputeBroadcastShape(
+                lhs_shape, rhs_shape, inferred_shape) &&
+            (!tc::frontend::IsSyntheticBiasAdd(node) ||
+             !tc::frontend::ComputeChannelBiasBroadcastShape(
+                 lhs_shape, rhs_shape, inferred_shape))) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Add' input shapes mismatch");
+            return;
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Add", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateMulShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().size() < 2)
+            return;
+        std::vector<int64_t> lhs_shape;
+        std::vector<int64_t> rhs_shape;
+        if (!ResolveBinaryInputShapes(
+                node, node_context, tensor_shapes, lhs_shape, rhs_shape))
+            return;
+        std::vector<int64_t> inferred_shape;
+        if (!tc::frontend::ComputeBroadcastShape(
+                lhs_shape, rhs_shape, inferred_shape)) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Mul' input shapes mismatch");
+            return;
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Mul", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateMatMulShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().size() < 2)
+            return;
+        std::vector<int64_t> lhs_shape;
+        std::vector<int64_t> rhs_shape;
+        if (!ResolveBinaryInputShapes(
+                node, node_context, tensor_shapes, lhs_shape, rhs_shape))
+            return;
+        if (lhs_shape.size() != 2 || rhs_shape.size() != 2) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'MatMul' expects rank-2 inputs");
+            return;
+        }
+        if (lhs_shape[1] != -1 && rhs_shape[0] != -1 &&
+            lhs_shape[1] != rhs_shape[0]) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'MatMul' inner dimensions mismatch");
+            return;
+        }
+        const std::vector<int64_t> inferred_shape{ lhs_shape[0], rhs_shape[1] };
+        ValidateDeclaredOutputShapes(
+            node, node_context, "MatMul", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateReshapeShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().size() < 2)
+            return;
+        std::vector<int64_t> input_shape;
+        if (!ResolveInputShape(
+                node, node_context, 0, tensor_shapes, input_shape))
+            return;
+        const std::string& shape_tensor_name = node.get_inputs()[1];
+        const auto shape_it = int64_initializers_.find(shape_tensor_name);
+        if (shape_it == int64_initializers_.end()) {
+            report_.add_error(
+                "ERROR: " + node_context +
+                " op 'Reshape' input[1] must be an INT64 initializer");
+            return;
+        }
+        std::vector<int64_t> inferred_shape;
+        std::string reshape_error;
+        if (!tc::frontend::InferReshapeOutputShape(
+                input_shape, shape_it->second, inferred_shape, reshape_error)) {
+            report_.add_error("ERROR: " + node_context + " op 'Reshape' " +
+                              reshape_error);
+            return;
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Reshape", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateTransposeShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().empty())
+            return;
+        std::vector<int64_t> input_shape;
+        if (!ResolveInputShape(
+                node, node_context, 0, tensor_shapes, input_shape))
+            return;
+        const auto* perm_attr = tc::frontend::FindAttr(node, "perm");
+        if (!perm_attr ||
+            perm_attr->get_data_type().id != tc::frontend::DataID::INT64)
+            return;
+        const auto& perm = perm_attr->get_values<int64_t>();
+        if (perm.size() != input_shape.size()) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Transpose' perm rank mismatch");
+            return;
+        }
+        std::vector<int64_t> inferred_shape;
+        inferred_shape.reserve(perm.size());
+        for (const int64_t axis : perm) {
+            if (axis < 0 ||
+                static_cast<std::size_t>(axis) >= input_shape.size())
+                return;
+            inferred_shape.push_back(input_shape[axis]);
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Transpose", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateConvShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().size() < 2)
+            return;
+        std::vector<int64_t> input_shape;
+        std::vector<int64_t> weight_shape;
+        if (!ResolveBinaryInputShapes(
+                node, node_context, tensor_shapes, input_shape, weight_shape))
+            return;
+        if (input_shape.size() != 4) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' input rank must be 4");
+            return;
+        }
+        if (weight_shape.size() != 4) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' weight rank must be 4");
+            return;
+        }
+        std::vector<int64_t> kernel_shape;
+        std::vector<int64_t> strides;
+        std::vector<int64_t> pads;
+        std::vector<int64_t> dilations;
+        std::vector<int64_t> group;
+        const bool attrs_ok =
+            ReadRequiredIntAttr(
+                node, node_context, "kernel_shape", 2, report_, kernel_shape) &&
+            ReadRequiredIntAttr(
+                node, node_context, "strides", 2, report_, strides) &&
+            ReadRequiredIntAttr(node, node_context, "pads", 4, report_, pads) &&
+            ReadRequiredIntAttr(
+                node, node_context, "dilations", 2, report_, dilations) &&
+            ReadRequiredIntAttr(node, node_context, "group", 1, report_, group);
+        if (!attrs_ok)
+            return;
+        if (!AllPositive(kernel_shape) || !AllPositive(strides) ||
+            !AllPositive(dilations)) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' kernel_shape, strides, and dilations "
+                              "must be positive");
+            return;
+        }
+        if (!AllNonNegative(pads)) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' pads must be non-negative");
+            return;
+        }
+        if (group[0] != 1) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' group must be 1");
+            return;
+        }
+        if (kernel_shape[0] != weight_shape[2] ||
+            kernel_shape[1] != weight_shape[3]) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' kernel_shape mismatch");
+            return;
+        }
+        if (input_shape[1] != -1 && weight_shape[1] != -1 &&
+            input_shape[1] != weight_shape[1]) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' channel mismatch");
+            return;
+        }
+        if (input_shape[2] == -1 || input_shape[3] == -1)
+            return;
+        const int64_t out_h =
+            tc::frontend::ComputeSpatialOutputSize(input_shape[2],
+                                                   kernel_shape[0],
+                                                   strides[0],
+                                                   pads[0],
+                                                   pads[2],
+                                                   dilations[0]);
+        const int64_t out_w =
+            tc::frontend::ComputeSpatialOutputSize(input_shape[3],
+                                                   kernel_shape[1],
+                                                   strides[1],
+                                                   pads[1],
+                                                   pads[3],
+                                                   dilations[1]);
+        if (out_h <= 0 || out_w <= 0) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'Conv' non-positive output shape");
+            return;
+        }
+        const std::vector<int64_t> inferred_shape{
+            input_shape[0], weight_shape[0], out_h, out_w
+        };
+        for (const std::string& output_name : node.get_outputs()) {
+            const auto* output_shape =
+                FindTensorShape(tensor_shapes, output_name);
+            if (output_shape && output_shape->size() != 4) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'Conv' output rank must be 4");
+                return;
+            }
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "Conv", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
+    void ValidateMaxPoolShape(
+        const tc::frontend::Node& node,
+        const std::string& node_context,
+        std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
+    {
+        if (node.get_inputs().empty())
+            return;
+        std::vector<int64_t> input_shape;
+        if (!ResolveInputShape(
+                node, node_context, 0, tensor_shapes, input_shape))
+            return;
+        if (input_shape.size() != 4) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'MaxPool' input rank must be 4");
+            return;
+        }
+        std::vector<int64_t> kernel_shape;
+        std::vector<int64_t> strides;
+        std::vector<int64_t> pads;
+        const bool attrs_ok = ReadMaxPoolIntAttr(node,
+                                                 node_context,
+                                                 "kernel_shape",
+                                                 2,
+                                                 /*required=*/true,
+                                                 report_,
+                                                 kernel_shape) &&
+                              ReadMaxPoolIntAttr(node,
+                                                 node_context,
+                                                 "strides",
+                                                 2,
+                                                 /*required=*/false,
+                                                 report_,
+                                                 strides) &&
+                              ReadMaxPoolIntAttr(node,
+                                                 node_context,
+                                                 "pads",
+                                                 4,
+                                                 /*required=*/false,
+                                                 report_,
+                                                 pads);
+        if (!attrs_ok)
+            return;
+        if (strides.empty())
+            strides = { 1, 1 };
+        if (pads.empty())
+            pads = { 0, 0, 0, 0 };
+        if (!AllPositive(kernel_shape) || !AllPositive(strides)) {
+            report_.add_error(
+                "ERROR: " + node_context +
+                " op 'MaxPool' kernel_shape and strides must be positive");
+            return;
+        }
+        if (!AllNonNegative(pads)) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'MaxPool' pads must be non-negative");
+            return;
+        }
+        if (input_shape[2] == -1 || input_shape[3] == -1)
+            return;
+        const int64_t out_h = tc::frontend::ComputeSpatialOutputSize(
+            input_shape[2], kernel_shape[0], strides[0], pads[0], pads[2], 1);
+        const int64_t out_w = tc::frontend::ComputeSpatialOutputSize(
+            input_shape[3], kernel_shape[1], strides[1], pads[1], pads[3], 1);
+        if (out_h <= 0 || out_w <= 0) {
+            report_.add_error("ERROR: " + node_context +
+                              " op 'MaxPool' non-positive output shape");
+            return;
+        }
+        const std::vector<int64_t> inferred_shape{
+            input_shape[0], input_shape[1], out_h, out_w
+        };
+        for (const std::string& output_name : node.get_outputs()) {
+            const auto* output_shape =
+                FindTensorShape(tensor_shapes, output_name);
+            if (output_shape && output_shape->size() != 4) {
+                report_.add_error("ERROR: " + node_context +
+                                  " op 'MaxPool' output rank must be 4");
+                return;
+            }
+        }
+        ValidateDeclaredOutputShapes(
+            node, node_context, "MaxPool", inferred_shape, tensor_shapes);
+        PropagateNodeOutputShape(
+            node, node_context, inferred_shape, tensor_shapes);
+    }
+
     void ValidateNodeShapes(
         const tc::frontend::Node& node,
         const std::string& node_context,
         std::unordered_map<std::string, std::vector<int64_t>>& tensor_shapes)
     {
         switch (node.get_op_kind()) {
-            case tc::frontend::OpKind::kRelu: {
-                if (node.get_inputs().empty()) {
-                    return;
-                }
-                std::vector<int64_t> input_shape;
-                if (!ResolveInputShape(
-                        node, node_context, 0, tensor_shapes, input_shape)) {
-                    return;
-                }
-
-                ValidateDeclaredOutputShapes(
-                    node, node_context, "Relu", input_shape, tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, input_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kAdd: {
-                if (node.get_inputs().size() < 2) {
-                    return;
-                }
-                std::vector<int64_t> lhs_shape;
-                std::vector<int64_t> rhs_shape;
-                if (!ResolveBinaryInputShapes(node,
-                                              node_context,
-                                              tensor_shapes,
-                                              lhs_shape,
-                                              rhs_shape)) {
-                    return;
-                }
-
-                std::vector<int64_t> inferred_shape;
-                if (!tc::frontend::ComputeBroadcastShape(
-                        lhs_shape, rhs_shape, inferred_shape) &&
-                    (!tc::frontend::IsSyntheticBiasAdd(node) ||
-                     !tc::frontend::ComputeChannelBiasBroadcastShape(
-                         lhs_shape, rhs_shape, inferred_shape))) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Add' input shapes mismatch");
-                    return;
-                }
-
-                ValidateDeclaredOutputShapes(
-                    node, node_context, "Add", inferred_shape, tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kMul: {
-                if (node.get_inputs().size() < 2) {
-                    return;
-                }
-                std::vector<int64_t> lhs_shape;
-                std::vector<int64_t> rhs_shape;
-                if (!ResolveBinaryInputShapes(node,
-                                              node_context,
-                                              tensor_shapes,
-                                              lhs_shape,
-                                              rhs_shape)) {
-                    return;
-                }
-
-                std::vector<int64_t> inferred_shape;
-                if (!tc::frontend::ComputeBroadcastShape(
-                        lhs_shape, rhs_shape, inferred_shape)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Mul' input shapes mismatch");
-                    return;
-                }
-
-                ValidateDeclaredOutputShapes(
-                    node, node_context, "Mul", inferred_shape, tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kMatMul: {
-                if (node.get_inputs().size() < 2) {
-                    return;
-                }
-                std::vector<int64_t> lhs_shape;
-                std::vector<int64_t> rhs_shape;
-                if (!ResolveBinaryInputShapes(node,
-                                              node_context,
-                                              tensor_shapes,
-                                              lhs_shape,
-                                              rhs_shape)) {
-                    return;
-                }
-
-                if (lhs_shape.size() != 2 || rhs_shape.size() != 2) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'MatMul' expects rank-2 inputs");
-                    return;
-                }
-
-                if (lhs_shape[1] != -1 && rhs_shape[0] != -1 &&
-                    lhs_shape[1] != rhs_shape[0]) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'MatMul' inner dimensions mismatch");
-                    return;
-                }
-
-                std::vector<int64_t> inferred_shape{ lhs_shape[0],
-                                                     rhs_shape[1] };
-                ValidateDeclaredOutputShapes(node,
-                                             node_context,
-                                             "MatMul",
-                                             inferred_shape,
-                                             tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kReshape: {
-                if (node.get_inputs().size() < 2) {
-                    return;
-                }
-
-                std::vector<int64_t> input_shape;
-                if (!ResolveInputShape(
-                        node, node_context, 0, tensor_shapes, input_shape)) {
-                    return;
-                }
-
-                const std::string& shape_tensor_name = node.get_inputs()[1];
-                const auto shape_it =
-                    int64_initializers_.find(shape_tensor_name);
-                if (shape_it == int64_initializers_.end()) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Reshape' input[1] must be an "
-                                      "INT64 initializer");
-                    return;
-                }
-
-                std::vector<int64_t> inferred_shape;
-                std::string reshape_error;
-                if (!tc::frontend::InferReshapeOutputShape(input_shape,
-                                                           shape_it->second,
-                                                           inferred_shape,
-                                                           reshape_error)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Reshape' " + reshape_error);
-                    return;
-                }
-
-                ValidateDeclaredOutputShapes(node,
-                                             node_context,
-                                             "Reshape",
-                                             inferred_shape,
-                                             tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kTranspose: {
-                if (node.get_inputs().empty()) {
-                    return;
-                }
-                std::vector<int64_t> input_shape;
-                if (!ResolveInputShape(
-                        node, node_context, 0, tensor_shapes, input_shape)) {
-                    return;
-                }
-
-                const auto* perm_attr = tc::frontend::FindAttr(node, "perm");
-                if (!perm_attr || perm_attr->get_data_type().id !=
-                                      tc::frontend::DataID::INT64) {
-                    return;
-                }
-
-                const auto& perm = perm_attr->get_values<int64_t>();
-                if (perm.size() != input_shape.size()) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Transpose' perm rank mismatch");
-                    return;
-                }
-
-                std::vector<int64_t> inferred_shape;
-                inferred_shape.reserve(perm.size());
-                for (const int64_t axis : perm) {
-                    if (axis < 0 ||
-                        static_cast<std::size_t>(axis) >= input_shape.size()) {
-                        return;
-                    }
-                    inferred_shape.push_back(input_shape[axis]);
-                }
-
-                ValidateDeclaredOutputShapes(node,
-                                             node_context,
-                                             "Transpose",
-                                             inferred_shape,
-                                             tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kConv: {
-                if (node.get_inputs().size() < 2) {
-                    return;
-                }
-
-                std::vector<int64_t> input_shape;
-                std::vector<int64_t> weight_shape;
-                if (!ResolveBinaryInputShapes(node,
-                                              node_context,
-                                              tensor_shapes,
-                                              input_shape,
-                                              weight_shape)) {
-                    return;
-                }
-
-                if (input_shape.size() != 4) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' input rank must be 4");
-                    return;
-                }
-                if (weight_shape.size() != 4) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' weight rank must be 4");
-                    return;
-                }
-
-                std::vector<int64_t> kernel_shape;
-                std::vector<int64_t> strides;
-                std::vector<int64_t> pads;
-                std::vector<int64_t> dilations;
-                std::vector<int64_t> group;
-                const bool attrs_ok =
-                    ReadRequiredIntAttr(node,
-                                        node_context,
-                                        "kernel_shape",
-                                        2,
-                                        report_,
-                                        kernel_shape) &&
-                    ReadRequiredIntAttr(
-                        node, node_context, "strides", 2, report_, strides) &&
-                    ReadRequiredIntAttr(
-                        node, node_context, "pads", 4, report_, pads) &&
-                    ReadRequiredIntAttr(node,
-                                        node_context,
-                                        "dilations",
-                                        2,
-                                        report_,
-                                        dilations) &&
-                    ReadRequiredIntAttr(
-                        node, node_context, "group", 1, report_, group);
-                if (!attrs_ok) {
-                    return;
-                }
-
-                if (!AllPositive(kernel_shape) || !AllPositive(strides) ||
-                    !AllPositive(dilations)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' kernel_shape, strides, and "
-                                      "dilations must be positive");
-                    return;
-                }
-                if (!AllNonNegative(pads)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' pads must be non-negative");
-                    return;
-                }
-                if (group[0] != 1) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' group must be 1");
-                    return;
-                }
-                if (kernel_shape[0] != weight_shape[2] ||
-                    kernel_shape[1] != weight_shape[3]) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' kernel_shape mismatch");
-                    return;
-                }
-                if (input_shape[1] != -1 && weight_shape[1] != -1 &&
-                    input_shape[1] != weight_shape[1]) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' channel mismatch");
-                    return;
-                }
-
-                if (input_shape[2] == -1 || input_shape[3] == -1) {
-                    return;
-                }
-
-                const int64_t out_h =
-                    tc::frontend::ComputeSpatialOutputSize(input_shape[2],
-                                                           kernel_shape[0],
-                                                           strides[0],
-                                                           pads[0],
-                                                           pads[2],
-                                                           dilations[0]);
-                const int64_t out_w =
-                    tc::frontend::ComputeSpatialOutputSize(input_shape[3],
-                                                           kernel_shape[1],
-                                                           strides[1],
-                                                           pads[1],
-                                                           pads[3],
-                                                           dilations[1]);
-                if (out_h <= 0 || out_w <= 0) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'Conv' non-positive output shape");
-                    return;
-                }
-
-                const std::vector<int64_t> inferred_shape{
-                    input_shape[0], weight_shape[0], out_h, out_w
-                };
-                for (const std::string& output_name : node.get_outputs()) {
-                    const auto* output_shape =
-                        FindTensorShape(tensor_shapes, output_name);
-                    if (output_shape && output_shape->size() != 4) {
-                        report_.add_error("ERROR: " + node_context +
-                                          " op 'Conv' output rank must be 4");
-                        return;
-                    }
-                }
-                ValidateDeclaredOutputShapes(
-                    node, node_context, "Conv", inferred_shape, tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
-            case tc::frontend::OpKind::kMaxPool: {
-                if (node.get_inputs().empty()) {
-                    return;
-                }
-                std::vector<int64_t> input_shape;
-                if (!ResolveInputShape(
-                        node, node_context, 0, tensor_shapes, input_shape)) {
-                    return;
-                }
-
-                if (input_shape.size() != 4) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'MaxPool' input rank must be 4");
-                    return;
-                }
-
-                std::vector<int64_t> kernel_shape;
-                std::vector<int64_t> strides;
-                std::vector<int64_t> pads;
-                const bool attrs_ok = ReadMaxPoolIntAttr(node,
-                                                         node_context,
-                                                         "kernel_shape",
-                                                         2,
-                                                         /*required=*/true,
-                                                         report_,
-                                                         kernel_shape) &&
-                                      ReadMaxPoolIntAttr(node,
-                                                         node_context,
-                                                         "strides",
-                                                         2,
-                                                         /*required=*/false,
-                                                         report_,
-                                                         strides) &&
-                                      ReadMaxPoolIntAttr(node,
-                                                         node_context,
-                                                         "pads",
-                                                         4,
-                                                         /*required=*/false,
-                                                         report_,
-                                                         pads);
-                if (!attrs_ok) {
-                    return;
-                }
-                if (strides.empty()) {
-                    strides = { 1, 1 };
-                }
-                if (pads.empty()) {
-                    pads = { 0, 0, 0, 0 };
-                }
-
-                if (!AllPositive(kernel_shape) || !AllPositive(strides)) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " op 'MaxPool' kernel_shape and strides "
-                                      "must be positive");
-                    return;
-                }
-                if (!AllNonNegative(pads)) {
-                    report_.add_error(
-                        "ERROR: " + node_context +
-                        " op 'MaxPool' pads must be non-negative");
-                    return;
-                }
-
-                if (input_shape[2] == -1 || input_shape[3] == -1) {
-                    return;
-                }
-
-                const int64_t out_h =
-                    tc::frontend::ComputeSpatialOutputSize(input_shape[2],
-                                                           kernel_shape[0],
-                                                           strides[0],
-                                                           pads[0],
-                                                           pads[2],
-                                                           1);
-                const int64_t out_w =
-                    tc::frontend::ComputeSpatialOutputSize(input_shape[3],
-                                                           kernel_shape[1],
-                                                           strides[1],
-                                                           pads[1],
-                                                           pads[3],
-                                                           1);
-                if (out_h <= 0 || out_w <= 0) {
-                    report_.add_error(
-                        "ERROR: " + node_context +
-                        " op 'MaxPool' non-positive output shape");
-                    return;
-                }
-
-                const std::vector<int64_t> inferred_shape{
-                    input_shape[0], input_shape[1], out_h, out_w
-                };
-                for (const std::string& output_name : node.get_outputs()) {
-                    const auto* output_shape =
-                        FindTensorShape(tensor_shapes, output_name);
-                    if (output_shape && output_shape->size() != 4) {
-                        report_.add_error(
-                            "ERROR: " + node_context +
-                            " op 'MaxPool' output rank must be 4");
-                        return;
-                    }
-                }
-                ValidateDeclaredOutputShapes(node,
-                                             node_context,
-                                             "MaxPool",
-                                             inferred_shape,
-                                             tensor_shapes);
-                PropagateNodeOutputShape(
-                    node, node_context, inferred_shape, tensor_shapes);
-                return;
-            }
-
+            case tc::frontend::OpKind::kRelu:
+                return ValidateReluShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kAdd:
+                return ValidateAddShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kMul:
+                return ValidateMulShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kMatMul:
+                return ValidateMatMulShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kReshape:
+                return ValidateReshapeShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kTranspose:
+                return ValidateTransposeShape(
+                    node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kConv:
+                return ValidateConvShape(node, node_context, tensor_shapes);
+            case tc::frontend::OpKind::kMaxPool:
+                return ValidateMaxPoolShape(node, node_context, tensor_shapes);
             case tc::frontend::OpKind::kUnknown:
                 return;
         }
