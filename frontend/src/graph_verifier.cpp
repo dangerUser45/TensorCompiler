@@ -46,18 +46,18 @@ bool ReadRequiredIntAttr(const tc::frontend::Node& node,
     out_values.clear();
     const auto* attr = tc::frontend::FindAttr(node, attr_name);
     if (attr == nullptr) {
-        report.add_error("ERROR: " + node_context + " op 'Conv' missing " +
+        report.add_error(node_context + " op 'Conv' missing " +
                          std::string(attr_name));
         return false;
     }
     if (attr->get_data_type().id != tc::frontend::DataID::INT64) {
-        report.add_error("ERROR: " + node_context + " op 'Conv' attribute '" +
+        report.add_error(node_context + " op 'Conv' attribute '" +
                          std::string(attr_name) + "' must be INT64");
         return false;
     }
     out_values = attr->get_values<int64_t>();
     if (out_values.size() != expected_size) {
-        report.add_error("ERROR: " + node_context + " op 'Conv' attribute '" +
+        report.add_error(node_context + " op 'Conv' attribute '" +
                          std::string(attr_name) + "' must have " +
                          std::to_string(expected_size) + " values");
         return false;
@@ -77,24 +77,22 @@ bool ReadMaxPoolIntAttr(const tc::frontend::Node& node,
     const auto* attr = tc::frontend::FindAttr(node, attr_name);
     if (attr == nullptr) {
         if (required) {
-            report.add_error("ERROR: " + node_context +
-                             " op 'MaxPool' missing " + std::string(attr_name));
+            report.add_error(node_context + " op 'MaxPool' missing " +
+                             std::string(attr_name));
             return false;
         }
         return true;
     }
     if (attr->get_data_type().id != tc::frontend::DataID::INT64) {
-        report.add_error("ERROR: " + node_context +
-                         " op 'MaxPool' attribute '" + std::string(attr_name) +
-                         "' must be INT64");
+        report.add_error(node_context + " op 'MaxPool' attribute '" +
+                         std::string(attr_name) + "' must be INT64");
         return false;
     }
     out_values = attr->get_values<int64_t>();
     if (out_values.size() != expected_size) {
-        report.add_error("ERROR: " + node_context +
-                         " op 'MaxPool' attribute '" + std::string(attr_name) +
-                         "' must have " + std::to_string(expected_size) +
-                         " values");
+        report.add_error(node_context + " op 'MaxPool' attribute '" +
+                         std::string(attr_name) + "' must have " +
+                         std::to_string(expected_size) + " values");
         return false;
     }
     return true;
@@ -123,11 +121,11 @@ public:
     void VisitGraph(const tc::frontend::Graph& graph)
     {
         if (graph.get_name().empty()) {
-            report_.add_warning("WARN: graph has no name");
+            report_.add_warning("graph has no name");
         }
 
         if (graph.get_output_tensors().empty()) {
-            report_.add_error("ERROR: graph has no output tensors");
+            report_.add_error("graph has no output tensors");
         }
 
         VisitOutputTensors(graph.get_output_tensors());
@@ -148,7 +146,7 @@ private:
                        std::size_t expected,
                        std::size_t got)
     {
-        report_.add_error("ERROR: " + node_context + " op '" +
+        report_.add_error(node_context + " op '" +
                           std::string(tc::frontend::ToString(op_kind)) +
                           "' expects " + std::to_string(expected) + " " +
                           field_name + ", got " + std::to_string(got));
@@ -167,8 +165,7 @@ private:
         const tc::frontend::OpTraits* traits =
             tc::frontend::GetOpTraits(op_kind);
         if (!traits) {
-            report_.add_error("ERROR: " + node_context +
-                              " has unknown op kind");
+            report_.add_error(node_context + " has unknown op kind");
             return;
         }
 
@@ -182,7 +179,7 @@ private:
                               input_count);
             } else {
                 report_.add_error(
-                    "ERROR: " + node_context + " op '" +
+                    node_context + " op '" +
                     std::string(tc::frontend::ToString(op_kind)) +
                     "' expects " + std::to_string(traits->inputs.min) + ".." +
                     std::to_string(traits->inputs.max) + " input(s), got " +
@@ -235,7 +232,7 @@ private:
         const tc::frontend::DataT* dtype =
             FindTensorDtype(tensor_dtypes, input_name);
         if (!dtype || dtype->id == tc::frontend::DataID::UNDEFINED) {
-            report_.add_error("ERROR: " + node_context + " input[" +
+            report_.add_error(node_context + " input[" +
                               std::to_string(input_index) + "] '" + input_name +
                               "' has undefined dtype");
             return false;
@@ -264,7 +261,7 @@ private:
 
             if (it->second.id != tc::frontend::DataID::UNDEFINED &&
                 it->second.id != inferred_dtype.id) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " output dtype mismatch for '" + output_name +
                                   "': inferred " + DtypeName(inferred_dtype) +
                                   ", declared " + DtypeName(it->second));
@@ -288,7 +285,7 @@ private:
             return false;
         if (!tc::frontend::IsSupportedNumericDtype(out_dtype.id)) {
             report_.add_error(
-                "ERROR: " + node_context + " op '" +
+                node_context + " op '" +
                 std::string(tc::frontend::ToString(node.get_op_kind())) +
                 "' expects numeric dtype, got " + DtypeName(out_dtype));
             return false;
@@ -312,7 +309,7 @@ private:
             return false;
         if (!tc::frontend::IsSupportedNumericDtype(out_lhs.id)) {
             report_.add_error(
-                "ERROR: " + node_context + " op '" +
+                node_context + " op '" +
                 std::string(tc::frontend::ToString(node.get_op_kind())) +
                 "' expects numeric dtype for input[0], got " +
                 DtypeName(out_lhs));
@@ -320,7 +317,7 @@ private:
         }
         if (!tc::frontend::IsSupportedNumericDtype(out_rhs.id)) {
             report_.add_error(
-                "ERROR: " + node_context + " op '" +
+                node_context + " op '" +
                 std::string(tc::frontend::ToString(node.get_op_kind())) +
                 "' expects numeric dtype for input[1], got " +
                 DtypeName(out_rhs));
@@ -328,7 +325,7 @@ private:
         }
         if (out_lhs.id != out_rhs.id) {
             report_.add_error(
-                "ERROR: " + node_context + " op '" +
+                node_context + " op '" +
                 std::string(tc::frontend::ToString(node.get_op_kind())) +
                 "' input dtypes mismatch: " + DtypeName(out_lhs) + " vs " +
                 DtypeName(out_rhs));
@@ -386,14 +383,14 @@ private:
                 }
 
                 if (!tc::frontend::IsSupportedNumericDtype(data_dtype.id)) {
-                    report_.add_error("ERROR: " + node_context +
+                    report_.add_error(node_context +
                                       " op 'Reshape' expects numeric dtype "
                                       "for input[0], got " +
                                       DtypeName(data_dtype));
                     return;
                 }
                 if (shape_dtype.id != tc::frontend::DataID::INT64) {
-                    report_.add_error("ERROR: " + node_context +
+                    report_.add_error(node_context +
                                       " op 'Reshape' expects INT64 dtype for "
                                       "input[1]");
                     return;
@@ -421,7 +418,7 @@ private:
 
                 if (input_dtype.id != tc::frontend::DataID::FLOAT ||
                     weight_dtype.id != tc::frontend::DataID::FLOAT) {
-                    report_.add_error("ERROR: " + node_context +
+                    report_.add_error(node_context +
                                       " op 'Conv' input dtypes mismatch: " +
                                       DtypeName(input_dtype) + " vs " +
                                       DtypeName(weight_dtype));
@@ -445,7 +442,7 @@ private:
                 }
 
                 if (input_dtype.id != tc::frontend::DataID::FLOAT) {
-                    report_.add_error("ERROR: " + node_context +
+                    report_.add_error(node_context +
                                       " op 'MaxPool' expects float32 input, "
                                       "got " +
                                       DtypeName(input_dtype));
@@ -499,7 +496,7 @@ private:
         const std::vector<int64_t>* shape =
             FindTensorShape(tensor_shapes, input_name);
         if (!shape) {
-            report_.add_error("ERROR: " + node_context + " input[" +
+            report_.add_error(node_context + " input[" +
                               std::to_string(input_index) + "] '" + input_name +
                               "' has undefined shape");
             return false;
@@ -536,7 +533,7 @@ private:
                 FindTensorShape(tensor_shapes, output_name);
             if (output_shape &&
                 !ShapesMatchForMvp(*output_shape, inferred_shape)) {
-                report_.add_error("ERROR: " + node_context + " op '" +
+                report_.add_error(node_context + " op '" +
                                   std::string(op_name) +
                                   "' output shape mismatch");
             }
@@ -561,7 +558,7 @@ private:
             }
 
             if (!ShapesMatchForMvp(it->second, inferred_shape)) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " output shape mismatch for '" + output_name +
                                   "'");
                 continue;
@@ -606,8 +603,7 @@ private:
             (!tc::frontend::IsSyntheticBiasAdd(node) ||
              !tc::frontend::ComputeChannelBiasBroadcastShape(
                  lhs_shape, rhs_shape, inferred_shape))) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Add' input shapes mismatch");
+            report_.add_error(node_context + " op 'Add' input shapes mismatch");
             return;
         }
         ValidateDeclaredOutputShapes(
@@ -631,8 +627,7 @@ private:
         std::vector<int64_t> inferred_shape;
         if (!tc::frontend::ComputeBroadcastShape(
                 lhs_shape, rhs_shape, inferred_shape)) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Mul' input shapes mismatch");
+            report_.add_error(node_context + " op 'Mul' input shapes mismatch");
             return;
         }
         ValidateDeclaredOutputShapes(
@@ -654,13 +649,13 @@ private:
                 node, node_context, tensor_shapes, lhs_shape, rhs_shape))
             return;
         if (lhs_shape.size() != 2 || rhs_shape.size() != 2) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'MatMul' expects rank-2 inputs");
             return;
         }
         if (lhs_shape[1] != -1 && rhs_shape[0] != -1 &&
             lhs_shape[1] != rhs_shape[0]) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'MatMul' inner dimensions mismatch");
             return;
         }
@@ -686,7 +681,7 @@ private:
         const auto shape_it = int64_initializers_.find(shape_tensor_name);
         if (shape_it == int64_initializers_.end()) {
             report_.add_error(
-                "ERROR: " + node_context +
+                node_context +
                 " op 'Reshape' input[1] must be an INT64 initializer");
             return;
         }
@@ -694,8 +689,7 @@ private:
         std::string reshape_error;
         if (!tc::frontend::InferReshapeOutputShape(
                 input_shape, shape_it->second, inferred_shape, reshape_error)) {
-            report_.add_error("ERROR: " + node_context + " op 'Reshape' " +
-                              reshape_error);
+            report_.add_error(node_context + " op 'Reshape' " + reshape_error);
             return;
         }
         ValidateDeclaredOutputShapes(
@@ -721,7 +715,7 @@ private:
             return;
         const auto& perm = perm_attr->get_values<int64_t>();
         if (perm.size() != input_shape.size()) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Transpose' perm rank mismatch");
             return;
         }
@@ -752,12 +746,11 @@ private:
                 node, node_context, tensor_shapes, input_shape, weight_shape))
             return;
         if (input_shape.size() != 4) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Conv' input rank must be 4");
+            report_.add_error(node_context + " op 'Conv' input rank must be 4");
             return;
         }
         if (weight_shape.size() != 4) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Conv' weight rank must be 4");
             return;
         }
@@ -779,31 +772,29 @@ private:
             return;
         if (!AllPositive(kernel_shape) || !AllPositive(strides) ||
             !AllPositive(dilations)) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Conv' kernel_shape, strides, and dilations "
                               "must be positive");
             return;
         }
         if (!AllNonNegative(pads)) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Conv' pads must be non-negative");
             return;
         }
         if (group[0] != 1) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Conv' group must be 1");
+            report_.add_error(node_context + " op 'Conv' group must be 1");
             return;
         }
         if (kernel_shape[0] != weight_shape[2] ||
             kernel_shape[1] != weight_shape[3]) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Conv' kernel_shape mismatch");
             return;
         }
         if (input_shape[1] != -1 && weight_shape[1] != -1 &&
             input_shape[1] != weight_shape[1]) {
-            report_.add_error("ERROR: " + node_context +
-                              " op 'Conv' channel mismatch");
+            report_.add_error(node_context + " op 'Conv' channel mismatch");
             return;
         }
         if (input_shape[2] == -1 || input_shape[3] == -1)
@@ -823,7 +814,7 @@ private:
                                                    pads[3],
                                                    dilations[1]);
         if (out_h <= 0 || out_w <= 0) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Conv' non-positive output shape");
             return;
         }
@@ -834,7 +825,7 @@ private:
             const auto* output_shape =
                 FindTensorShape(tensor_shapes, output_name);
             if (output_shape && output_shape->size() != 4) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " op 'Conv' output rank must be 4");
                 return;
             }
@@ -857,7 +848,7 @@ private:
                 node, node_context, 0, tensor_shapes, input_shape))
             return;
         if (input_shape.size() != 4) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'MaxPool' input rank must be 4");
             return;
         }
@@ -893,12 +884,12 @@ private:
             pads = { 0, 0, 0, 0 };
         if (!AllPositive(kernel_shape) || !AllPositive(strides)) {
             report_.add_error(
-                "ERROR: " + node_context +
+                node_context +
                 " op 'MaxPool' kernel_shape and strides must be positive");
             return;
         }
         if (!AllNonNegative(pads)) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'MaxPool' pads must be non-negative");
             return;
         }
@@ -909,7 +900,7 @@ private:
         const int64_t out_w = tc::frontend::ComputeSpatialOutputSize(
             input_shape[3], kernel_shape[1], strides[1], pads[1], pads[3], 1);
         if (out_h <= 0 || out_w <= 0) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'MaxPool' non-positive output shape");
             return;
         }
@@ -920,7 +911,7 @@ private:
             const auto* output_shape =
                 FindTensorShape(tensor_shapes, output_name);
             if (output_shape && output_shape->size() != 4) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " op 'MaxPool' output rank must be 4");
                 return;
             }
@@ -985,7 +976,7 @@ private:
 
         if (it->second.id != dtype.id) {
             report_.add_error(
-                "ERROR: tensor '" + tensor_name +
+                "tensor '" + tensor_name +
                 "' has conflicting dtypes: " + DtypeName(it->second) + " vs " +
                 DtypeName(dtype) + " (" + source_context + ")");
         }
@@ -1047,7 +1038,7 @@ private:
 
         if (!it->second.empty() && !shape.empty() &&
             !ShapesMatchForMvp(it->second, shape)) {
-            report_.add_error("ERROR: tensor '" + tensor_name +
+            report_.add_error("tensor '" + tensor_name +
                               "' has conflicting shapes");
         }
 
@@ -1111,14 +1102,14 @@ private:
 
         const auto* perm_attr = perm_it->second;
         if (perm_attr->get_data_type().id != tc::frontend::DataID::INT64) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Transpose' attribute 'perm' must be INTS");
             return;
         }
 
         const auto& perm = perm_attr->get_values<int64_t>();
         if (perm.empty()) {
-            report_.add_error("ERROR: " + node_context +
+            report_.add_error(node_context +
                               " op 'Transpose' attribute 'perm' is empty");
             return;
         }
@@ -1127,14 +1118,14 @@ private:
         seen_axes.reserve(perm.size());
         for (const int64_t axis : perm) {
             if (axis < 0) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " op 'Transpose' attribute 'perm' contains "
                                   "negative axis " +
                                   std::to_string(axis));
             }
 
             if (!seen_axes.insert(axis).second) {
-                report_.add_error("ERROR: " + node_context +
+                report_.add_error(node_context +
                                   " op 'Transpose' attribute 'perm' has "
                                   "duplicate axis " +
                                   std::to_string(axis));
@@ -1154,22 +1145,21 @@ private:
 
         for (std::size_t i = 0; i < attrs.size(); ++i) {
             if (!attrs[i]) {
-                report_.add_error("ERROR: " + node_context + ".attribute[" +
+                report_.add_error(node_context + ".attribute[" +
                                   std::to_string(i) + "] is null");
                 continue;
             }
 
             const std::string& attr_name = attrs[i]->get_name();
             if (attr_name.empty()) {
-                report_.add_error("ERROR: " + node_context + ".attribute[" +
+                report_.add_error(node_context + ".attribute[" +
                                   std::to_string(i) + "] has empty name");
                 continue;
             }
 
             if (!attrs_by_name.emplace(attr_name, attrs[i].get()).second) {
-                report_.add_error("ERROR: " + node_context +
-                                  " has duplicate attribute '" + attr_name +
-                                  "'");
+                report_.add_error(node_context + " has duplicate attribute '" +
+                                  attr_name + "'");
                 continue;
             }
 
@@ -1184,7 +1174,7 @@ private:
                 case tc::frontend::OpKind::kMatMul:
                 case tc::frontend::OpKind::kReshape:
                     report_.add_error(
-                        "ERROR: " + node_context + " op '" +
+                        node_context + " op '" +
                         std::string(tc::frontend::ToString(op_kind)) +
                         "' does not support attributes");
                     break;
@@ -1192,7 +1182,7 @@ private:
                 case tc::frontend::OpKind::kTranspose:
                     if (attr_name != "perm") {
                         report_.add_error(
-                            "ERROR: " + node_context +
+                            node_context +
                             " op 'Transpose' has unsupported attribute '" +
                             attr_name + "'");
                     }
@@ -1212,13 +1202,13 @@ private:
     {
         for (std::size_t i = 0; i < outputs.size(); ++i) {
             if (!outputs[i]) {
-                report_.add_error("ERROR: output_tensor[" + std::to_string(i) +
+                report_.add_error("output_tensor[" + std::to_string(i) +
                                   "] is null");
                 continue;
             }
 
             if (outputs[i]->get_name().empty()) {
-                report_.add_error("ERROR: output_tensor[" + std::to_string(i) +
+                report_.add_error("output_tensor[" + std::to_string(i) +
                                   "] has empty name");
             }
         }
@@ -1231,21 +1221,20 @@ private:
 
         for (std::size_t i = 0; i < initializers.size(); ++i) {
             if (!initializers[i]) {
-                report_.add_error("ERROR: initializer[" + std::to_string(i) +
+                report_.add_error("initializer[" + std::to_string(i) +
                                   "] is null");
                 continue;
             }
 
             const std::string& name = initializers[i]->get_name();
             if (name.empty()) {
-                report_.add_error("ERROR: initializer[" + std::to_string(i) +
+                report_.add_error("initializer[" + std::to_string(i) +
                                   "] has empty name");
                 continue;
             }
 
             if (!init_names.insert(name).second) {
-                report_.add_error("ERROR: duplicate initializer name '" + name +
-                                  "'");
+                report_.add_error("duplicate initializer name '" + name + "'");
             }
         }
     }
@@ -1259,8 +1248,7 @@ private:
 
         for (std::size_t ni = 0; ni < nodes.size(); ++ni) {
             if (!nodes[ni]) {
-                report_.add_error("ERROR: node[" + std::to_string(ni) +
-                                  "] is null");
+                report_.add_error("node[" + std::to_string(ni) + "] is null");
                 continue;
             }
 
@@ -1269,11 +1257,11 @@ private:
                 tc::frontend::BuildNodeContext(node, ni);
 
             if (node.get_outputs().empty()) {
-                report_.add_error("ERROR: " + node_context + " has no output");
+                report_.add_error(node_context + " has no output");
             }
 
             if (node.get_name_op().empty()) {
-                report_.add_error("ERROR: " + node_context + " has no op type");
+                report_.add_error(node_context + " has no op type");
             }
 
             ValidateNodeSemantics(
@@ -1283,21 +1271,19 @@ private:
             local_outputs.reserve(node.get_outputs().size());
             for (const std::string& out : node.get_outputs()) {
                 if (out.empty()) {
-                    report_.add_error("ERROR: " + node_context +
-                                      " has empty output name");
+                    report_.add_error(node_context + " has empty output name");
                     continue;
                 }
 
                 if (!local_outputs.insert(out).second) {
-                    report_.add_error("ERROR: " + node_context +
+                    report_.add_error(node_context +
                                       " has duplicate output name '" + out +
                                       "'");
                 }
 
                 if (!global_outputs.insert(out).second) {
-                    report_.add_error(
-                        "ERROR: duplicate output name across nodes '" + out +
-                        "'");
+                    report_.add_error("duplicate output name across nodes '" +
+                                      out + "'");
                 }
             }
         }
@@ -1352,20 +1338,20 @@ void ValidateRuntimeTensor(const TensorInfo& tensor,
         std::string("runtime ") + role + " '" + name + "'";
 
     if (tensor.get_data_type().id != DataID::FLOAT) {
-        out_report.add_error("ERROR: executable verifier " + label +
+        out_report.add_error("executable verifier " + label +
                              " must be float32");
     }
 
     const auto& shape = tensor.get_shape();
     if (shape.empty()) {
-        out_report.add_error("ERROR: executable verifier " + label +
+        out_report.add_error("executable verifier " + label +
                              " must have shape");
         return;
     }
 
     for (const int64_t dim : shape) {
         if (dim < 0) {
-            out_report.add_error("ERROR: executable verifier " + label +
+            out_report.add_error("executable verifier " + label +
                                  " must have static shape");
             return;
         }
@@ -1400,11 +1386,11 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
 
     if (graph.get_input_tensors().size() != 1) {
         out_report.add_error(
-            "ERROR: executable verifier expects exactly 1 runtime input, got " +
+            "executable verifier expects exactly 1 runtime input, got " +
             std::to_string(graph.get_input_tensors().size()));
     }
     if (graph.get_output_tensors().size() != 1) {
-        out_report.add_error("ERROR: executable verifier expects exactly 1 "
+        out_report.add_error("executable verifier expects exactly 1 "
                              "runtime output, got " +
                              std::to_string(graph.get_output_tensors().size()));
     }
@@ -1431,18 +1417,18 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
         if (init->get_data_type().id != DataID::FLOAT &&
             !is_allowed_reshape_shape) {
             out_report.add_error(
-                "ERROR: executable verifier " + label +
+                "executable verifier " + label +
                 " must be float32 or an INT64 Reshape shape initializer");
         }
 
         const auto& shape = init->get_shape();
         if (shape.empty()) {
-            out_report.add_error("ERROR: executable verifier " + label +
+            out_report.add_error("executable verifier " + label +
                                  " must have shape");
         } else {
             for (const int64_t dim : shape) {
                 if (dim < 0) {
-                    out_report.add_error("ERROR: executable verifier " + label +
+                    out_report.add_error("executable verifier " + label +
                                          " must have static shape");
                     break;
                 }
@@ -1450,7 +1436,7 @@ bool VerifyGraphForExecutable(const Graph& graph, Report& out_report)
         }
 
         if (!init->has_values()) {
-            out_report.add_error("ERROR: executable verifier " + label +
+            out_report.add_error("executable verifier " + label +
                                  " must have data");
         }
     }

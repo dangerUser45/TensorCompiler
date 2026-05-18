@@ -1233,4 +1233,32 @@ TEST(GraphVerifierSemantic, ConvWithDynamicSpatialDimsSkipsShapeInference)
         << DiagnosticsAsString(report);
 }
 
+TEST(GraphVerifierSemantic, DiagnosticMessagesHaveNoEmbeddedSeverityPrefix)
+{
+    // Error case: trigger a known error and verify the message body has no
+    // leading "ERROR: " prefix -- the severity is carried by
+    // Diagnostic::severity.
+    auto error_graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kRelu, "Relu", { "x", "b" }, { "y" });
+    tc::frontend::verify::Report error_report;
+    tc::frontend::verify::VerifyGraphForExecution(error_graph, error_report);
+    ASSERT_GT(error_report.error_count(), 0u);
+    for (const auto& d : error_report.diagnostics()) {
+        EXPECT_FALSE(d.message.rfind("ERROR: ", 0) == 0)
+            << "message has embedded severity prefix: " << d.message;
+    }
+
+    // Warning case: trigger a known warning and verify no "WARN: " prefix.
+    auto warn_graph = MakeSingleNodeGraph(
+        tc::frontend::OpKind::kRelu, "Relu", { "x" }, { "y" });
+    warn_graph.set_name("");
+    tc::frontend::verify::Report warn_report;
+    tc::frontend::verify::VerifyGraphForExecution(warn_graph, warn_report);
+    ASSERT_GT(warn_report.warning_count(), 0u);
+    for (const auto& d : warn_report.diagnostics()) {
+        EXPECT_FALSE(d.message.rfind("WARN: ", 0) == 0)
+            << "message has embedded severity prefix: " << d.message;
+    }
+}
+
 } // namespace
