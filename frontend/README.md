@@ -71,24 +71,44 @@ Used `float32` ONNX initializers are embedded in MLIR as deterministic
 
 ## Структура
 
-- `include/graph.hpp` — внутренний IR (`Graph`, `Node`, tensor/attr данные)
-- `include/onnx_importer.hpp` — API загрузки и импорта ONNX
-- `include/graph_verifier.hpp` — API verifier и diagnostics report
-- `include/dump_graph.hpp` — построение DOT-дампа
-- `include/mlir_emitter.hpp` — Graph IR -> textual MLIR
-- `include/model_metadata.hpp` — EXEC metadata JSON sidecar
-- `src/onnx_importer.cpp` — ONNX -> IR
-- `src/graph_verifier.cpp` — проверки исполнимости графа
-- `src/mlir_emitter.cpp` — production textual MLIR handoff
-- `src/model_metadata.cpp` — deterministic metadata JSON
-- `src/frontend_driver.cpp` — общий CLI driver
+**Публичные заголовки (`include/`):**
+- `graph.hpp` — внутренний IR (`Graph`, `Node`, tensor/attr данные)
+- `op_kind.hpp` — `OpKind` enum и маппинг из ONNX op string
+- `op_traits.hpp` — arity и attribute trait queries по `OpKind`
+- `type_info.hpp` — `DataT` enum и `TypeInfo<T>` (element type system)
+- `graph_utils.hpp` — `BuildNodeContext`, утилиты атрибутов
+- `frontend_constants.hpp` — naming constants для synthetic nodes (`kSyntheticAddSuffix` и др.)
+- `shape_inference.hpp` — broadcast и shape inference utilities
+- `dump_style.hpp` — Graphviz DOT style constants
+- `onnx_importer.hpp` — API загрузки и импорта ONNX
+- `graph_verifier.hpp` — API verifier и diagnostics report
+- `dump_graph.hpp` — построение DOT-дампа
+- `mlir_emitter.hpp` — Graph IR → textual MLIR
+- `model_metadata.hpp` — EXEC metadata JSON sidecar
+
+**Реализация (`src/`):**
+- `onnx_importer.cpp` — ONNX → IR
+- `op_kind.cpp` — `OpKindFromString` и сопутствующие функции
+- `op_traits.cpp` — реализация op traits
+- `type_info.cpp` — реализация type info
+- `graph_utils.cpp` — реализация graph utilities
+- `shape_inference.cpp` — реализация shape inference
+- `graph_verifier.cpp` — проверки исполнимости графа
+- `mlir_emitter.cpp` — production textual MLIR handoff
+- `model_metadata.cpp` — deterministic metadata JSON
+- `dump_graph.cpp` — Graphviz DOT
+- `frontend_driver.cpp` — общий CLI driver
+- `driver_defaults.hpp` — build-time default output paths
+- `backend_runner.hpp` / `backend_runner.cpp` — backend integration для driver
+
+**Прочее:**
 - `onnx_lib/onnx.proto` — protobuf-схема ONNX
 - `models/` — тестовые `.onnx` модели
 
 ## Требования
 
 - CMake >= 3.20
-- C++17 compiler
+- C++20 compiler
 - Protobuf (`libprotobuf` и `protoc`)
 
 ## Сборка
@@ -97,7 +117,7 @@ Used `float32` ONNX initializers are embedded in MLIR as deterministic
 
 ```bash
 cmake -S frontend -B frontend/build
-cmake --build frontend/build -j4
+cmake --build frontend/build --parallel
 ```
 
 ## Использование driver
@@ -177,5 +197,5 @@ handoff contract для runtime/backend.
 Форматирование управляется корневым `.clang-format`.
 
 ```bash
-clang-format -style=file -i frontend/include/*.hpp frontend/src/*.cpp
+clang-format -style=file -i frontend/include/*.hpp frontend/src/*.cpp frontend/src/*.hpp
 ```
