@@ -131,6 +131,67 @@ void FillTensorValueInfo(::onnx::ValueInfoProto* value_info,
     return model;
 }
 
+::onnx::ModelProto BuildGemmModel(bool with_bias)
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_gemm_graph");
+
+    FillTensorValueInfo(graph->add_input(), "A", { 2, 3 });
+    FillTensorValueInfo(graph->add_input(), "B", { 3, 4 });
+    if (with_bias) {
+        FillTensorValueInfo(graph->add_input(), "C", { 4 });
+    }
+    FillTensorValueInfo(graph->add_output(), "Y", { 2, 4 });
+
+    auto* node = graph->add_node();
+    node->set_name("gemm_0");
+    node->set_op_type("Gemm");
+    node->add_input("A");
+    node->add_input("B");
+    if (with_bias) {
+        node->add_input("C");
+    }
+    node->add_output("Y");
+
+    return model;
+}
+
+::onnx::ModelProto BuildGemmWithBadAlphaModel()
+{
+    ::onnx::ModelProto model;
+    model.set_ir_version(8);
+
+    auto* opset = model.add_opset_import();
+    opset->set_version(13);
+
+    auto* graph = model.mutable_graph();
+    graph->set_name("importer_gemm_bad_alpha_graph");
+
+    FillTensorValueInfo(graph->add_input(), "A", { 2, 3 });
+    FillTensorValueInfo(graph->add_input(), "B", { 3, 4 });
+    FillTensorValueInfo(graph->add_output(), "Y", { 2, 4 });
+
+    auto* node = graph->add_node();
+    node->set_name("gemm_bad");
+    node->set_op_type("Gemm");
+    node->add_input("A");
+    node->add_input("B");
+    node->add_output("Y");
+
+    auto* alpha_attr = node->add_attribute();
+    alpha_attr->set_name("alpha");
+    alpha_attr->set_type(::onnx::AttributeProto::FLOAT);
+    alpha_attr->set_f(2.0f);
+
+    return model;
+}
+
 class TempModelFile final
 {
 public:
@@ -355,4 +416,53 @@ TEST(ImporterOpKind, UnsupportedModelStillFails)
     EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
         ModelPath("candy-8.onnx").string(), graph, error));
     EXPECT_NE(error.find("unsupported operator"), std::string::npos) << error;
+}
+
+TEST(ImporterOpKind, GemmWithoutBiasProducesSingleMatMulNode)
+{
+    const TempModelFile temp_model(BuildGemmModel(/*with_bias=*/false));
+
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 1u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kMatMul);
+}
+
+TEST(ImporterOpKind, GemmWithBiasProducesMatMulThenAddNodes)
+{
+    const TempModelFile temp_model(BuildGemmModel(/*with_bias=*/true));
+
+    tc::frontend::Graph graph;
+    std::string error;
+
+    ASSERT_TRUE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), graph, error))
+        << error;
+
+    ASSERT_EQ(graph.get_nodes().size(), 2u);
+    ASSERT_NE(graph.get_nodes()[0], nullptr);
+    ASSERT_NE(graph.get_nodes()[1], nullptr);
+    EXPECT_EQ(graph.get_nodes()[0]->get_op_kind(),
+              tc::frontend::OpKind::kMatMul);
+    EXPECT_EQ(graph.get_nodes()[1]->get_op_kind(), tc::frontend::OpKind::kAdd);
+}
+
+TEST(ImporterOpKind, GemmWithNonUnitAlphaRejectsWithError)
+{
+    const TempModelFile temp_model(BuildGemmWithBadAlphaModel());
+
+    tc::frontend::Graph graph;
+    std::string error;
+
+    EXPECT_FALSE(tc::frontend::onnx::ImportOnnxToGraph(
+        temp_model.path().string(), graph, error));
+    EXPECT_NE(error.find("alpha"), std::string::npos)
+        << "expected 'alpha' in error, got: " << error;
 }
