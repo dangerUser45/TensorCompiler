@@ -48,10 +48,12 @@ Backend принимает MLIR, который генерирует frontend д
 - `include/codegen_driver.hpp` — API для LLVM IR и ASM
 - `include/object_emitter.hpp` — API для object emission
 - `include/executable_linker.hpp` — API для линковки executable
+- `include/llvm_target_init.hpp` — `InitializeNativeLlvmBackend` (LLVM target registration)
 - `src/frontend_mlir.cpp` — parser implementation
 - `src/codegen_driver.cpp` — LLVM IR/ASM emission
 - `src/object_emitter.cpp` — `.o` emission через `llc`
 - `src/executable_linker.cpp` — runtime linking через `clang++`
+- `src/llvm_target_init.cpp` — LLVM target initialization
 - `runtime/tc_model_runner.cpp` — CPU runner для raw `.f32`
 - `tests/` — backend smoke/unit/e2e tests
 
