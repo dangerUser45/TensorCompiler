@@ -124,8 +124,7 @@ bool ConvertOnnxElemTypeToDataType(int elem_type,
     }
 
     return SetError(out_error,
-                    "ERROR: " + tensor_context +
-                        " has unsupported elem_type: " +
+                    tensor_context + " has unsupported elem_type: " +
                         ::onnx::TensorProto_DataType_Name(type));
 }
 
@@ -159,7 +158,7 @@ bool ParseRawVector(const std::string& raw,
 {
     if (raw.size() % sizeof(T) != 0) {
         return SetError(out_error,
-                        "ERROR: initializer '" + init_name +
+                        "initializer '" + init_name +
                             "' has invalid raw_data size");
     }
     out.resize(raw.size() / sizeof(T));
@@ -186,7 +185,7 @@ bool FillNumericFromFieldOrRaw(
             return false;
     } else {
         return SetError(out_error,
-                        "ERROR: initializer '" + tp.name() + "' has no " +
+                        "initializer '" + tp.name() + "' has no " +
                             std::string(type_name) + " data");
     }
 
@@ -252,8 +251,7 @@ bool FillInitializerValues(const ::onnx::TensorProto& tp,
 
         default:
             return SetError(out_error,
-                            "ERROR: unsupported initializer type for '" +
-                                tp.name() +
+                            "unsupported initializer type for '" + tp.name() +
                                 "': " + ::onnx::TensorProto_DataType_Name(dt));
     }
 }
@@ -269,12 +267,11 @@ bool BuildInitializers(const ::onnx::GraphProto& g,
         const auto& tp = g.initializer(i);
 
         if (tp.name().empty()) {
-            return SetError(out_error, "ERROR: initializer has empty name");
+            return SetError(out_error, "initializer has empty name");
         }
         if (!tp.has_data_type()) {
             return SetError(out_error,
-                            "ERROR: initializer '" + tp.name() +
-                                "' has no data_type");
+                            "initializer '" + tp.name() + "' has no data_type");
         }
 
         auto init = std::make_unique<Initializers>();
@@ -329,8 +326,7 @@ bool FillAttributeValues(const ::onnx::AttributeProto& src,
         case ::onnx::AttributeProto_AttributeType_FLOAT: {
             if (!src.has_f()) {
                 return SetError(out_error,
-                                "ERROR: " + attr_context +
-                                    " FLOAT has no value");
+                                attr_context + " FLOAT has no value");
             }
             dst.set_values<float>({ src.f() });
             return true;
@@ -338,8 +334,7 @@ bool FillAttributeValues(const ::onnx::AttributeProto& src,
 
         case ::onnx::AttributeProto_AttributeType_INT: {
             if (!src.has_i()) {
-                return SetError(out_error,
-                                "ERROR: " + attr_context + " INT has no value");
+                return SetError(out_error, attr_context + " INT has no value");
             }
             dst.set_values<int64_t>({ src.i() });
             return true;
@@ -348,8 +343,7 @@ bool FillAttributeValues(const ::onnx::AttributeProto& src,
         case ::onnx::AttributeProto_AttributeType_STRING: {
             if (!src.has_s()) {
                 return SetError(out_error,
-                                "ERROR: " + attr_context +
-                                    " STRING has no value");
+                                attr_context + " STRING has no value");
             }
             dst.set_values<std::string>({ src.s() });
             return true;
@@ -388,7 +382,7 @@ bool FillAttributeValues(const ::onnx::AttributeProto& src,
         default:
             return SetError(
                 out_error,
-                "ERROR: " + attr_context + " unsupported type: " +
+                attr_context + " unsupported type: " +
                     ::onnx::AttributeProto_AttributeType_Name(type));
     }
 }
@@ -468,12 +462,12 @@ bool ValidateIntAttrLength(const Attribute& attr,
 {
     if (attr.get_data_type().id != DataID::INT64) {
         return SetError(out_error,
-                        "ERROR: " + node_context + " op 'Conv' attribute '" +
+                        node_context + " op 'Conv' attribute '" +
                             attr.get_name() + "' must be INTS");
     }
     if (attr.get_values<int64_t>().size() != expected_size) {
         return SetError(out_error,
-                        "ERROR: " + node_context + " op 'Conv' attribute '" +
+                        node_context + " op 'Conv' attribute '" +
                             attr.get_name() + "' must have " +
                             std::to_string(expected_size) + " values");
     }
@@ -509,13 +503,13 @@ bool ComputeSameUpperPads(const std::vector<int64_t>* input_shape,
 
     if (input_shape == nullptr || input_shape->size() != 4) {
         return SetError(out_error,
-                        "ERROR: " + node_context +
+                        node_context +
                             " op 'Conv' auto_pad=SAME_UPPER requires rank-4 "
                             "static input shape for non-unit stride/dilation");
     }
     if ((*input_shape)[2] < 0 || (*input_shape)[3] < 0) {
         return SetError(out_error,
-                        "ERROR: " + node_context +
+                        node_context +
                             " op 'Conv' auto_pad=SAME_UPPER requires static "
                             "spatial dimensions");
     }
@@ -558,19 +552,19 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
     for (std::size_t i = 0; i < attrs.size(); ++i) {
         if (!attrs[i]) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] is null");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] is null");
         }
         const std::string& attr_name = attrs[i]->get_name();
         if (attr_name.empty()) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] has empty name");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] has empty name");
         }
         if (!seen_names.insert(attr_name).second) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " has duplicate attribute '" + attr_name + "'");
+                            node_context + " has duplicate attribute '" +
+                                attr_name + "'");
         }
 
         if (attr_name == "kernel_shape") {
@@ -606,7 +600,7 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
             if (attrs[i]->get_data_type().id != DataID::INT64 ||
                 attrs[i]->get_values<int64_t>().size() != 1) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'Conv' attribute 'group' must be INT");
             }
             continue;
@@ -617,14 +611,14 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
                 attrs[i]->get_values<std::string>().size() != 1) {
                 return SetError(
                     out_error,
-                    "ERROR: " + node_context +
+                    node_context +
                         " op 'Conv' attribute 'auto_pad' must be STRING");
             }
             const auto& value = attrs[i]->get_values<std::string>().front();
             if (value != std::string(tc::frontend::kAutoPadNotSet) &&
                 value != std::string(tc::frontend::kAutoPadSameUpper)) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'Conv' supports only "
                                     "auto_pad in {NOTSET, "
                                     "SAME_UPPER}, got " +
@@ -634,7 +628,7 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
         }
 
         return SetError(out_error,
-                        "ERROR: " + node_context +
+                        node_context +
                             " op 'Conv' has unsupported attribute '" +
                             attr_name + "'");
     }
@@ -643,7 +637,7 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
         if (inferred_kernel_shape == nullptr ||
             inferred_kernel_shape->size() != 2) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Conv' cannot infer kernel_shape");
         }
         attrs.push_back(MakeIntAttr("kernel_shape", *inferred_kernel_shape));
@@ -690,13 +684,13 @@ bool NormalizeConvAttributes(Node::AttrVecT& attrs,
     if (auto_pad_value == std::string(tc::frontend::kAutoPadSameUpper)) {
         if (has_pads) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Conv' must not set 'pads' when "
                                 "auto_pad='SAME_UPPER'");
         }
         if (!kernel_attr || !strides_attr || !dilations_attr) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Conv' SAME_UPPER normalization missing "
                                 "kernel/strides/dilations");
         }
@@ -727,12 +721,12 @@ bool ValidateMaxPoolIntAttrLength(const Attribute& attr,
 {
     if (attr.get_data_type().id != DataID::INT64) {
         return SetError(out_error,
-                        "ERROR: " + node_context + " op 'MaxPool' attribute '" +
+                        node_context + " op 'MaxPool' attribute '" +
                             attr.get_name() + "' must be INTS");
     }
     if (attr.get_values<int64_t>().size() != expected_size) {
         return SetError(out_error,
-                        "ERROR: " + node_context + " op 'MaxPool' attribute '" +
+                        node_context + " op 'MaxPool' attribute '" +
                             attr.get_name() + "' must have " +
                             std::to_string(expected_size) + " values");
     }
@@ -754,19 +748,19 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
     for (std::size_t i = 0; i < attrs.size(); ++i) {
         if (!attrs[i]) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] is null");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] is null");
         }
         const std::string& attr_name = attrs[i]->get_name();
         if (attr_name.empty()) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] has empty name");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] has empty name");
         }
         if (!seen_names.insert(attr_name).second) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " has duplicate attribute '" + attr_name + "'");
+                            node_context + " has duplicate attribute '" +
+                                attr_name + "'");
         }
 
         if (attr_name == "kernel_shape") {
@@ -778,7 +772,7 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
             const auto& values = attrs[i]->get_values<int64_t>();
             if (values[0] <= 0 || values[1] <= 0) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'MaxPool' kernel_shape must be "
                                     "positive");
             }
@@ -793,7 +787,7 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
             const auto& values = attrs[i]->get_values<int64_t>();
             if (values[0] <= 0 || values[1] <= 0) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'MaxPool' strides must be positive");
             }
             continue;
@@ -807,9 +801,8 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
             for (const int64_t pad : attrs[i]->get_values<int64_t>()) {
                 if (pad < 0) {
                     return SetError(out_error,
-                                    "ERROR: " + node_context +
-                                        " op 'MaxPool' pads must be "
-                                        "non-negative");
+                                    node_context + " op 'MaxPool' pads must be "
+                                                   "non-negative");
                 }
             }
             continue;
@@ -820,15 +813,14 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
                 attrs[i]->get_values<std::string>().size() != 1) {
                 return SetError(
                     out_error,
-                    "ERROR: " + node_context +
+                    node_context +
                         " op 'MaxPool' attribute 'auto_pad' must be STRING");
             }
             const auto& value = attrs[i]->get_values<std::string>().front();
             if (value != std::string(tc::frontend::kAutoPadNotSet)) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
-                                    " op 'MaxPool' supports only "
-                                    "auto_pad=NOTSET");
+                                node_context + " op 'MaxPool' supports only "
+                                               "auto_pad=NOTSET");
             }
             continue;
         }
@@ -840,9 +832,8 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
             const auto& values = attrs[i]->get_values<int64_t>();
             if (values[0] != 1 || values[1] != 1) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
-                                    " op 'MaxPool' supports only "
-                                    "dilations=[1,1]");
+                                node_context + " op 'MaxPool' supports only "
+                                               "dilations=[1,1]");
             }
             continue;
         }
@@ -850,27 +841,27 @@ bool NormalizeMaxPoolAttributes(Node::AttrVecT& attrs,
             if (attrs[i]->get_data_type().id != DataID::INT64 ||
                 attrs[i]->get_values<int64_t>().size() != 1) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'MaxPool' attribute 'ceil_mode' must "
                                     "be INT");
             }
             if (attrs[i]->get_values<int64_t>().front() != 0) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'MaxPool' supports only ceil_mode=0");
             }
             continue;
         }
 
         return SetError(out_error,
-                        "ERROR: " + node_context +
+                        node_context +
                             " op 'MaxPool' has unsupported attribute '" +
                             attr_name + "'");
     }
 
     if (!has_kernel_shape) {
         return SetError(out_error,
-                        "ERROR: " + node_context +
+                        node_context +
                             " op 'MaxPool' missing required attribute "
                             "'kernel_shape'");
     }
@@ -908,21 +899,21 @@ bool NormalizeNodeAttributes(OpKind op_kind,
     for (std::size_t i = 0; i < attrs.size(); ++i) {
         if (!attrs[i]) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] is null");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] is null");
         }
 
         const std::string& attr_name = attrs[i]->get_name();
         if (attr_name.empty()) {
             return SetError(out_error,
-                            "ERROR: " + node_context + ".attribute[" +
-                                std::to_string(i) + "] has empty name");
+                            node_context + ".attribute[" + std::to_string(i) +
+                                "] has empty name");
         }
 
         if (!seen_names.insert(attr_name).second) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " has duplicate attribute '" + attr_name + "'");
+                            node_context + " has duplicate attribute '" +
+                                attr_name + "'");
         }
 
         if (op_kind == OpKind::kUnknown) {
@@ -930,17 +921,16 @@ bool NormalizeNodeAttributes(OpKind op_kind,
         }
 
         if (!SupportsAttributes(op_kind)) {
-            return SetError(out_error,
-                            "ERROR: " + node_context + " op '" +
-                                std::string(ToString(op_kind)) +
-                                "' does not support attribute '" + attr_name +
-                                "'");
+            return SetError(
+                out_error,
+                node_context + " op '" + std::string(ToString(op_kind)) +
+                    "' does not support attribute '" + attr_name + "'");
         }
 
         if (op_kind == OpKind::kTranspose) {
             if (attr_name != "perm") {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
+                                node_context +
                                     " op 'Transpose' has unsupported "
                                     "attribute '" +
                                     attr_name + "'");
@@ -948,14 +938,14 @@ bool NormalizeNodeAttributes(OpKind op_kind,
             if (attrs[i]->get_data_type().id != DataID::INT64) {
                 return SetError(
                     out_error,
-                    "ERROR: " + node_context +
+                    node_context +
                         " op 'Transpose' attribute 'perm' must be INTS");
             }
             continue;
         }
 
         return SetError(out_error,
-                        "ERROR: " + node_context + " op '" +
+                        node_context + " op '" +
                             std::string(ToString(op_kind)) +
                             "' has unsupported attribute '" + attr_name + "'");
     }
@@ -976,19 +966,17 @@ bool ParseNode(const ::onnx::NodeProto& src,
         src.name(), static_cast<std::size_t>(node_index));
     const std::string& op_type = src.op_type();
     if (op_type.empty()) {
-        return SetError(out_error, "ERROR: " + node_context + " has empty op");
+        return SetError(out_error, node_context + " has empty op");
     }
 
     if (op_type == "Gemm") {
         if (src.input_size() < 2 || src.input_size() > 3) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Gemm' expects 2 or 3 inputs");
+                            node_context + " op 'Gemm' expects 2 or 3 inputs");
         }
         if (src.output_size() != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Gemm' expects 1 output");
+                            node_context + " op 'Gemm' expects 1 output");
         }
 
         float alpha = 1.0f;
@@ -1005,14 +993,12 @@ bool ParseNode(const ::onnx::NodeProto& src,
             const std::string attr_context =
                 node_context + ".attribute[" + std::to_string(i) + "]";
             if (attr_name.empty()) {
-                return SetError(out_error,
-                                "ERROR: " + attr_context + " has empty name");
+                return SetError(out_error, attr_context + " has empty name");
             }
             if (!seen_names.insert(attr_name).second) {
                 return SetError(out_error,
-                                "ERROR: " + node_context +
-                                    " has duplicate attribute '" + attr_name +
-                                    "'");
+                                node_context + " has duplicate attribute '" +
+                                    attr_name + "'");
             }
 
             const auto attr_type = ResolveAttributeType(attr);
@@ -1020,7 +1006,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
                 if (attr_type != ::onnx::AttributeProto_AttributeType_FLOAT ||
                     !attr.has_f()) {
                     return SetError(out_error,
-                                    "ERROR: " + node_context +
+                                    node_context +
                                         " op 'Gemm' "
                                         "attribute '" +
                                         attr_name + "' must be FLOAT");
@@ -1038,7 +1024,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
                 if (attr_type != ::onnx::AttributeProto_AttributeType_INT ||
                     !attr.has_i()) {
                     return SetError(out_error,
-                                    "ERROR: " + node_context +
+                                    node_context +
                                         " op 'Gemm' "
                                         "attribute '" +
                                         attr_name + "' must be INT");
@@ -1054,7 +1040,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
             }
 
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Gemm' has "
                                 "unsupported attribute '" +
                                 attr_name + "'");
@@ -1063,23 +1049,21 @@ bool ParseNode(const ::onnx::NodeProto& src,
         constexpr float kEpsilon = 1.0e-6F;
         if (std::fabs(alpha - 1.0F) > kEpsilon) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Gemm' supports only alpha=1");
+                            node_context + " op 'Gemm' supports only alpha=1");
         }
         if (std::fabs(beta - 1.0F) > kEpsilon) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Gemm' supports only beta=1");
+                            node_context + " op 'Gemm' supports only beta=1");
         }
         if (trans_a != 0 || trans_b != 0) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Gemm' supports only transA=0 and "
                                 "transB=0");
         }
         if (broadcast != 0 && broadcast != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
+                            node_context +
                                 " op 'Gemm' broadcast must be 0 or 1");
         }
 
@@ -1126,8 +1110,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
     const OpKind op_kind = OpKindFromString(op_type);
     if (op_kind == OpKind::kUnknown) {
         return SetError(out_error,
-                        "ERROR: " + node_context +
-                            " unsupported operator: " + op_type);
+                        node_context + " unsupported operator: " + op_type);
     }
 
     auto node = std::make_unique<Node>();
@@ -1152,37 +1135,31 @@ bool ParseNode(const ::onnx::NodeProto& src,
     if (op_kind == OpKind::kConv) {
         if (src.input_size() < 2 || src.input_size() > 3) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Conv' expects 2 or 3 inputs");
+                            node_context + " op 'Conv' expects 2 or 3 inputs");
         }
         if (src.output_size() != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Conv' expects 1 output");
+                            node_context + " op 'Conv' expects 1 output");
         }
     }
     if (op_kind == OpKind::kReshape) {
         if (src.input_size() != 2) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Reshape' expects 2 inputs");
+                            node_context + " op 'Reshape' expects 2 inputs");
         }
         if (src.output_size() != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'Reshape' expects 1 output");
+                            node_context + " op 'Reshape' expects 1 output");
         }
     }
     if (op_kind == OpKind::kMaxPool) {
         if (src.input_size() != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'MaxPool' expects 1 input");
+                            node_context + " op 'MaxPool' expects 1 input");
         }
         if (src.output_size() != 1) {
             return SetError(out_error,
-                            "ERROR: " + node_context +
-                                " op 'MaxPool' expects 1 output");
+                            node_context + " op 'MaxPool' expects 1 output");
         }
     }
 
