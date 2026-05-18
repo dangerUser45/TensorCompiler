@@ -953,6 +953,144 @@ bool NormalizeNodeAttributes(OpKind op_kind,
     return true;
 }
 
+bool ImportGemm(const ::onnx::NodeProto& src,
+                std::vector<std::unique_ptr<Node>>& out_nodes,
+                std::string& out_error,
+                int node_index,
+                const std::string& node_context)
+{
+    if (src.input_size() < 2 || src.input_size() > 3) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' expects 2 or 3 inputs");
+    }
+    if (src.output_size() != 1) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' expects 1 output");
+    }
+
+    float alpha = 1.0f;
+    float beta = 1.0f;
+    int64_t trans_a = 0;
+    int64_t trans_b = 0;
+    int64_t broadcast = 0;
+    std::unordered_set<std::string> seen_names;
+    seen_names.reserve(src.attribute_size());
+
+    for (int i = 0; i < src.attribute_size(); ++i) {
+        const auto& attr = src.attribute(i);
+        const std::string& attr_name = attr.name();
+        const std::string attr_context =
+            node_context + ".attribute[" + std::to_string(i) + "]";
+        if (attr_name.empty()) {
+            return SetError(out_error, attr_context + " has empty name");
+        }
+        if (!seen_names.insert(attr_name).second) {
+            return SetError(out_error,
+                            node_context + " has duplicate attribute '" +
+                                attr_name + "'");
+        }
+
+        const auto attr_type = ResolveAttributeType(attr);
+        if (attr_name == "alpha" || attr_name == "beta") {
+            if (attr_type != ::onnx::AttributeProto_AttributeType_FLOAT ||
+                !attr.has_f()) {
+                return SetError(out_error,
+                                node_context +
+                                    " op 'Gemm' "
+                                    "attribute '" +
+                                    attr_name + "' must be FLOAT");
+            }
+            if (attr_name == "alpha") {
+                alpha = attr.f();
+            } else {
+                beta = attr.f();
+            }
+            continue;
+        }
+
+        if (attr_name == "transA" || attr_name == "transB" ||
+            attr_name == "broadcast") {
+            if (attr_type != ::onnx::AttributeProto_AttributeType_INT ||
+                !attr.has_i()) {
+                return SetError(out_error,
+                                node_context +
+                                    " op 'Gemm' "
+                                    "attribute '" +
+                                    attr_name + "' must be INT");
+            }
+            if (attr_name == "transA") {
+                trans_a = attr.i();
+            } else if (attr_name == "transB") {
+                trans_b = attr.i();
+            } else {
+                broadcast = attr.i();
+            }
+            continue;
+        }
+
+        return SetError(out_error,
+                        node_context +
+                            " op 'Gemm' has "
+                            "unsupported attribute '" +
+                            attr_name + "'");
+    }
+
+    constexpr float kEpsilon = 1.0e-6F;
+    if (std::fabs(alpha - 1.0F) > kEpsilon) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' supports only alpha=1");
+    }
+    if (std::fabs(beta - 1.0F) > kEpsilon) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' supports only beta=1");
+    }
+    if (trans_a != 0 || trans_b != 0) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' supports only transA=0 and "
+                                       "transB=0");
+    }
+    if (broadcast != 0 && broadcast != 1) {
+        return SetError(out_error,
+                        node_context + " op 'Gemm' broadcast must be 0 or 1");
+    }
+
+    const bool has_bias = src.input_size() >= 3 && !src.input(2).empty();
+    const std::string& final_output = src.output(0);
+    std::string matmul_output = final_output;
+    if (has_bias) {
+        matmul_output += std::string(tc::frontend::kGemmMatMulOutputSuffix) +
+                         std::to_string(node_index);
+    }
+
+    auto matmul_node = std::make_unique<Node>();
+    matmul_node->set_name_node(
+        src.name().empty()
+            ? std::string(tc::frontend::kGemmMatMulNodePrefix) +
+                  std::to_string(node_index)
+            : src.name() + std::string(tc::frontend::kSyntheticMatMulSuffix));
+    matmul_node->set_name_op("MatMul");
+    matmul_node->set_op_kind(OpKind::kMatMul);
+    matmul_node->set_inputs({ src.input(0), src.input(1) });
+    matmul_node->set_outputs({ matmul_output });
+    out_nodes.push_back(std::move(matmul_node));
+
+    if (has_bias) {
+        auto add_node = std::make_unique<Node>();
+        add_node->set_name_node(
+            src.name().empty()
+                ? std::string(tc::frontend::kGemmAddNodePrefix) +
+                      std::to_string(node_index)
+                : src.name() + std::string(tc::frontend::kSyntheticAddSuffix));
+        add_node->set_name_op("Add");
+        add_node->set_op_kind(OpKind::kAdd);
+        add_node->set_inputs({ matmul_output, src.input(2) });
+        add_node->set_outputs({ final_output });
+        out_nodes.push_back(std::move(add_node));
+    }
+
+    return true;
+}
+
 bool ParseNode(const ::onnx::NodeProto& src,
                std::vector<std::unique_ptr<Node>>& out_nodes,
                std::string& out_error,
@@ -970,141 +1108,7 @@ bool ParseNode(const ::onnx::NodeProto& src,
     }
 
     if (op_type == "Gemm") {
-        if (src.input_size() < 2 || src.input_size() > 3) {
-            return SetError(out_error,
-                            node_context + " op 'Gemm' expects 2 or 3 inputs");
-        }
-        if (src.output_size() != 1) {
-            return SetError(out_error,
-                            node_context + " op 'Gemm' expects 1 output");
-        }
-
-        float alpha = 1.0f;
-        float beta = 1.0f;
-        int64_t trans_a = 0;
-        int64_t trans_b = 0;
-        int64_t broadcast = 0;
-        std::unordered_set<std::string> seen_names;
-        seen_names.reserve(src.attribute_size());
-
-        for (int i = 0; i < src.attribute_size(); ++i) {
-            const auto& attr = src.attribute(i);
-            const std::string& attr_name = attr.name();
-            const std::string attr_context =
-                node_context + ".attribute[" + std::to_string(i) + "]";
-            if (attr_name.empty()) {
-                return SetError(out_error, attr_context + " has empty name");
-            }
-            if (!seen_names.insert(attr_name).second) {
-                return SetError(out_error,
-                                node_context + " has duplicate attribute '" +
-                                    attr_name + "'");
-            }
-
-            const auto attr_type = ResolveAttributeType(attr);
-            if (attr_name == "alpha" || attr_name == "beta") {
-                if (attr_type != ::onnx::AttributeProto_AttributeType_FLOAT ||
-                    !attr.has_f()) {
-                    return SetError(out_error,
-                                    node_context +
-                                        " op 'Gemm' "
-                                        "attribute '" +
-                                        attr_name + "' must be FLOAT");
-                }
-                if (attr_name == "alpha") {
-                    alpha = attr.f();
-                } else {
-                    beta = attr.f();
-                }
-                continue;
-            }
-
-            if (attr_name == "transA" || attr_name == "transB" ||
-                attr_name == "broadcast") {
-                if (attr_type != ::onnx::AttributeProto_AttributeType_INT ||
-                    !attr.has_i()) {
-                    return SetError(out_error,
-                                    node_context +
-                                        " op 'Gemm' "
-                                        "attribute '" +
-                                        attr_name + "' must be INT");
-                }
-                if (attr_name == "transA") {
-                    trans_a = attr.i();
-                } else if (attr_name == "transB") {
-                    trans_b = attr.i();
-                } else {
-                    broadcast = attr.i();
-                }
-                continue;
-            }
-
-            return SetError(out_error,
-                            node_context +
-                                " op 'Gemm' has "
-                                "unsupported attribute '" +
-                                attr_name + "'");
-        }
-
-        constexpr float kEpsilon = 1.0e-6F;
-        if (std::fabs(alpha - 1.0F) > kEpsilon) {
-            return SetError(out_error,
-                            node_context + " op 'Gemm' supports only alpha=1");
-        }
-        if (std::fabs(beta - 1.0F) > kEpsilon) {
-            return SetError(out_error,
-                            node_context + " op 'Gemm' supports only beta=1");
-        }
-        if (trans_a != 0 || trans_b != 0) {
-            return SetError(out_error,
-                            node_context +
-                                " op 'Gemm' supports only transA=0 and "
-                                "transB=0");
-        }
-        if (broadcast != 0 && broadcast != 1) {
-            return SetError(out_error,
-                            node_context +
-                                " op 'Gemm' broadcast must be 0 or 1");
-        }
-
-        const bool has_bias = src.input_size() >= 3 && !src.input(2).empty();
-        const std::string& final_output = src.output(0);
-        std::string matmul_output = final_output;
-        if (has_bias) {
-            matmul_output +=
-                std::string(tc::frontend::kGemmMatMulOutputSuffix) +
-                std::to_string(node_index);
-        }
-
-        auto matmul_node = std::make_unique<Node>();
-        matmul_node->set_name_node(
-            src.name().empty()
-                ? std::string(tc::frontend::kGemmMatMulNodePrefix) +
-                      std::to_string(node_index)
-                : src.name() +
-                      std::string(tc::frontend::kSyntheticMatMulSuffix));
-        matmul_node->set_name_op("MatMul");
-        matmul_node->set_op_kind(OpKind::kMatMul);
-        matmul_node->set_inputs({ src.input(0), src.input(1) });
-        matmul_node->set_outputs({ matmul_output });
-        out_nodes.push_back(std::move(matmul_node));
-
-        if (has_bias) {
-            auto add_node = std::make_unique<Node>();
-            add_node->set_name_node(
-                src.name().empty()
-                    ? std::string(tc::frontend::kGemmAddNodePrefix) +
-                          std::to_string(node_index)
-                    : src.name() +
-                          std::string(tc::frontend::kSyntheticAddSuffix));
-            add_node->set_name_op("Add");
-            add_node->set_op_kind(OpKind::kAdd);
-            add_node->set_inputs({ matmul_output, src.input(2) });
-            add_node->set_outputs({ final_output });
-            out_nodes.push_back(std::move(add_node));
-        }
-
-        return true;
+        return ImportGemm(src, out_nodes, out_error, node_index, node_context);
     }
 
     const OpKind op_kind = OpKindFromString(op_type);
