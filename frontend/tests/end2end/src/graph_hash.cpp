@@ -57,8 +57,8 @@ void HashTensors(std::size_t& seed, const VecT& vec)
         const std::size_t name_hash = string_hasher(name);
         HashCombine(seed, name_hash);
 
-        const std::string data_type_str = elem->get_data_type().data_type_str;
-        const std::size_t dtype_hash = string_hasher(data_type_str);
+        const std::string dtype_name = DataIDToString(elem->get_data_type().id);
+        const std::size_t dtype_hash = string_hasher(dtype_name);
         HashCombine(seed, dtype_hash);
 
         const std::vector<int64_t>& shape = elem->get_shape();
@@ -102,9 +102,9 @@ void HashNodes(std::size_t& seed, const tc::frontend::Graph::NodeVecT& node_vec)
             const std::size_t name_hash = string_hasher(name);
             HashCombine(seed, name_hash);
 
-            const std::string& data_type_str =
-                attr->get_data_type().data_type_str;
-            const std::size_t dtype_hash = string_hasher(data_type_str);
+            const std::string dtype_name =
+                DataIDToString(attr->get_data_type().id);
+            const std::size_t dtype_hash = string_hasher(dtype_name);
             HashCombine(seed, dtype_hash);
         }
     }

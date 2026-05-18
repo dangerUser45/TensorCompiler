@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(TensorCompilerFrontend LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -47,13 +47,23 @@ add_custom_command(
 add_library(tc_frontend_onnx STATIC
     src/onnx_importer.cpp
     src/graph_verifier.cpp
+    src/mlir_emitter.cpp
+    src/model_metadata.cpp
+    src/dump_graph.cpp
+    src/shape_inference.cpp
+    src/graph_utils.cpp
+    src/op_traits.cpp
+    src/type_info.cpp
+    src/op_kind.cpp
     ${PROTO_SRCS}
 )
 
-add_library(project_warnings INTERFACE)
-target_compile_options(project_warnings INTERFACE
-  $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
-)
+if (NOT TARGET project_warnings)
+    add_library(project_warnings INTERFACE)
+    target_compile_options(project_warnings INTERFACE
+      $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic>
+    )
+endif()
 
 target_include_directories(tc_frontend_onnx PUBLIC
     include
@@ -66,16 +76,33 @@ target_link_libraries(tc_frontend_onnx PRIVATE project_warnings)
 
 add_executable(frontend_driver
     src/frontend_driver.cpp
-    tests/end2end/src/graph_hash.cpp    
+    src/backend_runner.cpp
+    tests/end2end/src/graph_hash.cpp
 )
 
 target_compile_definitions(frontend_driver PRIVATE
     TC_DEFAULT_DUMP_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/dump\" 
+    TC_DEFAULT_METADATA_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/metadata\"
 )
 target_link_libraries(frontend_driver PRIVATE
     tc_frontend_onnx
     project_warnings
 )
+
+if (TARGET tc_backend)
+    target_link_libraries(frontend_driver PRIVATE tc_backend)
+    target_compile_definitions(frontend_driver PRIVATE
+        TC_FRONTEND_HAS_BACKEND=1
+        TC_DEFAULT_LLVM_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/llvm\"
+        TC_DEFAULT_ASM_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/asm\"
+        TC_DEFAULT_OBJECT_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/object\"
+        TC_DEFAULT_EXE_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/bin\"
+    )
+else()
+    target_compile_definitions(frontend_driver PRIVATE
+        TC_FRONTEND_HAS_BACKEND=0
+    )
+endif()
 
 enable_testing()
 add_subdirectory(tests)

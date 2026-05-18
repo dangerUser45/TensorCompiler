@@ -9,31 +9,30 @@
 #include <variant>
 #include <vector>
 
+#include "op_kind.hpp"
 #include "type_info.hpp"
 
 namespace tc::frontend {
 
-using TensorData = std::variant<
-    std::monostate,
+using TensorData = std::variant<std::monostate,
 
-    std::vector<int8_t>,
-    std::vector<int16_t>,
-    std::vector<int32_t>,
-    std::vector<int64_t>,
+                                std::vector<int8_t>,
+                                std::vector<int16_t>,
+                                std::vector<int32_t>,
+                                std::vector<int64_t>,
 
-    std::vector<uint8_t>,
-    std::vector<uint32_t>,
-    std::vector<uint16_t>,
-    std::vector<uint64_t>,
+                                std::vector<uint8_t>,
+                                std::vector<uint32_t>,
+                                std::vector<uint16_t>,
+                                std::vector<uint64_t>,
 
-    std::vector<float>,
-    std::vector<double>,
+                                std::vector<float>,
+                                std::vector<double>,
 
-    std::vector<std::complex<float>>,
-    std::vector<std::complex<double>>,
+                                std::vector<std::complex<float>>,
+                                std::vector<std::complex<double>>,
 
-    std::vector<std::string>
->;
+                                std::vector<std::string>>;
 
 class TensorInfo
 {
@@ -64,8 +63,12 @@ public:
     {
         shape_ = std::move(shape);
     }
+    void set_data_type(DataT data_type)
+    {
+        data_type_ = std::move(data_type);
+    }
 
-    DataT get_data_type() const noexcept
+    const DataT& get_data_type() const noexcept
     {
         return data_type_;
     }
@@ -78,29 +81,47 @@ private:
     std::vector<int64_t> shape_;
 };
 
+namespace detail {
+
+template<typename T>
+const std::vector<T>& typed_get(DataID id, const TensorData& values)
+{
+    if (id == DataID::UNDEFINED)
+        throw std::logic_error(
+            "Type hasn't been defined yet. Use \"set_values()\"");
+    return std::get<std::vector<T>>(values);
+}
+
+template<typename T>
+void typed_set(DataT& data_type, TensorData& values, std::vector<T> vec)
+{
+    const DataT new_type = TypeInfo<T>::type;
+    if (data_type.id != DataID::UNDEFINED && data_type.id != new_type.id)
+        throw std::logic_error("set_values: dtype change is forbidden");
+    values = std::move(vec);
+    data_type = new_type;
+}
+
+} // namespace detail
+
 struct Initializers final : public TensorInfo
 {
 public:
     template<typename T>
     const std::vector<T>& get_values() const
     {
-        if (data_type_.id == DataID::UNDEFINED)
-            throw std::logic_error(
-                "Type hasn't been defined yet. Use \"set_values()\"");
-        return std::get<std::vector<T>>(values_);
+        return detail::typed_get<T>(data_type_.id, values_);
     }
 
     template<typename T>
     void set_values(std::vector<T> vec)
     {
-        DataT type = TypeInfo<T>::type;
+        detail::typed_set(data_type_, values_, std::move(vec));
+    }
 
-        // Если тип уже зафиксирован, запрещаем менять его на другой.
-        if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
-            throw std::logic_error("set_values: dtype change is forbidden");
-        }
-        values_ = std::move(vec);
-        data_type_ = type;
+    bool has_values() const noexcept
+    {
+        return !std::holds_alternative<std::monostate>(values_);
     }
 
 private:
@@ -113,17 +134,14 @@ public:
     template<typename T>
     const std::vector<T>& get_values() const
     {
-        if (data_type_.id == DataID::UNDEFINED)
-            throw std::logic_error(
-                "Type hasn't been defined yet. Use \"set_values()\"");
-        return std::get<std::vector<T>>(values_);
+        return detail::typed_get<T>(data_type_.id, values_);
     }
 
     const std::string& get_name() const noexcept
     {
         return name_;
     }
-    DataT get_data_type() const noexcept
+    const DataT& get_data_type() const noexcept
     {
         return data_type_;
     }
@@ -131,14 +149,7 @@ public:
     template<typename T>
     void set_values(std::vector<T> vec)
     {
-        DataT type = TypeInfo<T>::type;
-
-        // Если тип уже зафиксирован, запрещаем менять его на другой.
-        if (data_type_.id != DataID::UNDEFINED && data_type_.id != type.id) {
-            throw std::logic_error("set_values: dtype change is forbidden");
-        }
-        values_ = std::move(vec);
-        data_type_ = type;
+        detail::typed_set(data_type_, values_, std::move(vec));
     }
 
     void set_name(std::string name)
@@ -168,6 +179,10 @@ public:
     {
         return name_op_;
     }
+    OpKind get_op_kind() const noexcept
+    {
+        return op_kind_;
+    }
     const std::vector<std::string>& get_inputs() const noexcept
     {
         return inputs_;
@@ -189,6 +204,10 @@ public:
     {
         name_op_ = std::move(name_op);
     }
+    void set_op_kind(OpKind op_kind) noexcept
+    {
+        op_kind_ = op_kind;
+    }
     void set_inputs(std::vector<std::string> inputs)
     {
         inputs_ = std::move(inputs);
@@ -205,6 +224,7 @@ public:
 private:
     std::string name_node_;
     std::string name_op_;
+    OpKind op_kind_ = OpKind::kUnknown;
 
     std::vector<std::string> inputs_;
     std::vector<std::string> outputs_;

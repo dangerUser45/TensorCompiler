@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "graph.hpp"
+namespace tc::frontend {
+class Graph;
+} // namespace tc::frontend
 
 namespace tc::frontend::verify {
 
@@ -54,5 +56,7 @@ private:
 const char* SeverityToString(Severity severity) noexcept;
 
 bool VerifyGraphForExecution(const Graph& graph, Report& out_report);
+
+bool VerifyGraphForExecutable(const Graph& graph, Report& out_report);
 
 } // namespace tc::frontend::verify
